@@ -29,3 +29,12 @@ enable_signup = true
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
+
+# Edge function : signin est l'entrée pour utilisateurs non authentifiés
+# (inscription + connexion par username). On désactive la vérification JWT
+# au niveau plateforme — la fonction valide elle-même les inputs et utilise
+# la service_role_key en interne pour les opérations privilégiées.
+# Les autres fonctions (generate-exercise, correct-attempt) gardent
+# verify_jwt = true par défaut : elles exigent un utilisateur connecté.
+[functions.signin]
+verify_jwt = false
