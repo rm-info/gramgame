@@ -33,7 +33,7 @@ npm install
 
 # 2. Copier les variables d'env et remplir avec votre projet Supabase
 cp .env.example .env
-# Éditer .env : PUBLIC_SUPABASE_URL et PUBLIC_SUPABASE_ANON_KEY
+# Éditer .env : PUBLIC_SUPABASE_URL et PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 # 3. Lancer le dev server
 npm run dev
@@ -46,7 +46,7 @@ L'app est accessible sur <http://localhost:5173>.
 ### 1. Créer le projet Supabase
 
 1. Aller sur <https://supabase.com>, créer un projet gratuit.
-2. Récupérer dans **Settings → API** : `Project URL` et `anon public key`. Les coller dans `.env`.
+2. Récupérer dans **Settings → API Keys** : `Project URL` et `Publishable key` (format `sb_publishable_*`). Les coller dans `.env`.
 3. Dans **Authentication → URL Configuration** :
     - `Site URL` : `http://localhost:5173`
     - `Redirect URLs` : ajouter `http://localhost:5173/auth-callback` et plus tard `https://<votre-user>.github.io/gramgame/auth-callback`.
@@ -114,7 +114,7 @@ Aller sur <http://localhost:5173>, créer un compte par magic link, faire l'onbo
 2. Dans **Settings → Pages** du repo, choisir **Source : GitHub Actions**.
 3. Dans **Settings → Secrets and variables → Actions**, ajouter :
     - `PUBLIC_SUPABASE_URL`
-    - `PUBLIC_SUPABASE_ANON_KEY`
+    - `PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 4. Pousser sur `main` → le workflow `.github/workflows/deploy.yml` se déclenche, build le site sous `/gramgame/` et le publie.
 5. Mettre à jour les **Redirect URLs** Supabase pour inclure `https://<votre-user>.github.io/gramgame/auth-callback`.
 
