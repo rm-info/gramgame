@@ -1,0 +1,143 @@
+:root {
+	--color-bg: #fbf9f4;
+	--color-surface: #ffffff;
+	--color-text: #1f2330;
+	--color-text-muted: #5a6072;
+	--color-primary: #2f5db1;
+	--color-primary-hover: #25488c;
+	--color-success: #2e8b57;
+	--color-warning: #c97a1d;
+	--color-error: #b8333c;
+	--color-border: #e3dfd3;
+
+	--radius: 10px;
+	--radius-sm: 6px;
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-6: 24px;
+	--space-8: 32px;
+	--space-12: 48px;
+
+	--font-stack:
+		ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+		Arial, sans-serif;
+	--font-serif: ui-serif, 'Charter', 'Bitstream Charter', 'Sitka Text', Georgia, serif;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	background: var(--color-bg);
+	color: var(--color-text);
+	font-family: var(--font-stack);
+	line-height: 1.55;
+	min-height: 100%;
+}
+
+a {
+	color: var(--color-primary);
+	text-decoration: none;
+}
+a:hover {
+	text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+
+button {
+	border: none;
+	background: var(--color-primary);
+	color: white;
+	padding: var(--space-3) var(--space-6);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	transition: background 120ms ease;
+}
+button:hover:not(:disabled) {
+	background: var(--color-primary-hover);
+}
+button:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+button.secondary {
+	background: transparent;
+	color: var(--color-primary);
+	border: 1px solid var(--color-primary);
+}
+button.secondary:hover:not(:disabled) {
+	background: var(--color-primary);
+	color: white;
+}
+
+input[type='text'],
+input[type='email'],
+select {
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) var(--space-3);
+	width: 100%;
+	max-width: 100%;
+}
+input:focus,
+select:focus {
+	outline: 2px solid var(--color-primary);
+	outline-offset: 1px;
+	border-color: transparent;
+}
+
+label {
+	display: block;
+	margin-bottom: var(--space-2);
+	font-weight: 500;
+}
+
+h1,
+h2,
+h3 {
+	font-family: var(--font-serif);
+	color: var(--color-text);
+}
+
+.card {
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+	padding: var(--space-6);
+	box-shadow: var(--shadow-sm);
+}
+
+.muted {
+	color: var(--color-text-muted);
+}
+
+.error {
+	color: var(--color-error);
+}
+
+.container {
+	max-width: 760px;
+	margin: 0 auto;
+	padding: var(--space-6) var(--space-4);
+}
+
+.stack > * + * {
+	margin-top: var(--space-4);
+}
