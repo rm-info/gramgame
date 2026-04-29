@@ -2,7 +2,7 @@
 
 Application web pédagogique : un "prof de grammaire en ligne" qui génère des textes à trous sur mesure, fait pratiquer l'élève à l'écran, corrige automatiquement, note avec appréciation et oriente vers les difficultés rencontrées.
 
-**Stack** : SvelteKit (static export) + Supabase (Postgres + Auth + Edge Functions) + LLM via OpenRouter. Hébergement gratuit sur GitHub Pages.
+**Stack** : SvelteKit (static export) + Supabase (Postgres + Auth + Edge Functions) + LLM (Gemini par défaut, n'importe quel provider compatible OpenAI). Hébergement gratuit sur GitHub Pages.
 
 ## Stack et architecture
 
@@ -12,13 +12,14 @@ Application web pédagogique : un "prof de grammaire en ligne" qui génère des 
 │ (GitHub Pages, gratuit)     │    │  ├── Postgres (data)     │
 │ - SvelteKit + adapter-static│◄──►│  ├── Auth (magic link)   │
 │ - Appelle Supabase via SDK  │    │  └── Edge Functions      │
-└─────────────────────────────┘    │       └── OpenRouter →   │
+└─────────────────────────────┘    │       └── LLM (HTTP) →   │
                                     └──────────────────────────┘
                                               │
                                               ▼
                                     ┌──────────────────────────┐
-                                    │ OpenRouter (LLM proxy)   │
-                                    │ Claude Haiku 4.5 default │
+                                    │ Provider LLM             │
+                                    │ Gemini 2.0 Flash défaut  │
+                                    │ (free tier 1500 req/jour)│
                                     └──────────────────────────┘
 ```
 
@@ -63,21 +64,34 @@ supabase db push
 
 Ou : copier le contenu de `supabase/migrations/0001_initial_schema.sql` puis `0002_seed_rules.sql` dans **SQL Editor** sur l'interface Supabase et exécuter.
 
-### 3. Configurer OpenRouter
+### 3. Configurer le provider LLM
 
-1. Créer un compte sur <https://openrouter.ai>, ajouter quelques euros de crédit.
-2. Générer une API key dans **Settings → Keys**.
-3. La stocker en secret Supabase :
+L'app utilise **n'importe quelle API compatible OpenAI** via 3 secrets Supabase. Par défaut elle est configurée pour **Gemini** (free tier généreux, ~750 exos/jour gratuits).
+
+**Option A — Gemini (recommandé pour démarrer, $0)**
+
+1. Créer une API key sur <https://aistudio.google.com/app/apikey>.
+2. La stocker comme secret Supabase :
 
 ```sh
-supabase secrets set OPENROUTER_API_KEY=sk-or-v1-xxxxx
+supabase secrets set LLM_API_KEY=AIza...
 ```
 
-Optionnel : changer le modèle par défaut
+C'est tout — `LLM_BASE_URL` et `LLM_MODEL` ont déjà des défauts Gemini-friendly (`gemini-2.0-flash`). Free tier : 15 req/min, 1500 req/jour.
+
+**Option B — OpenRouter (multi-modèles, ~0,01 €/exercice avec Claude Haiku)**
 
 ```sh
+supabase secrets set LLM_API_KEY=sk-or-v1-xxxxx
+supabase secrets set LLM_BASE_URL=https://openrouter.ai/api/v1
 supabase secrets set LLM_MODEL=anthropic/claude-haiku-4-5
 ```
+
+OpenRouter propose aussi des modèles `:free` (Llama, Mistral, Qwen) à $0 avec rate limits — voir <https://openrouter.ai/models?max_price=0>.
+
+**Option C — Mistral, OpenAI, Anthropic direct**
+
+Même principe : 3 secrets pour pointer vers leur endpoint OpenAI-compatible et choisir un modèle.
 
 ### 4. Déployer les Edge Functions
 
@@ -135,7 +149,7 @@ Pour les règles de type `free_text` (accords, conjugaison), une logique de vali
 ## Coûts
 
 - **Hébergement** : 0 € (GitHub Pages + tier gratuit Supabase).
-- **LLM** (OpenRouter, Claude Haiku 4.5) : ~0,005 € pour un exercice de 20 trous + ~0,002 € pour son appréciation. Comptez ~0,01 €/exercice complet.
+- **LLM** : 0 € avec Gemini (free tier de 1500 requêtes/jour, soit ~750 exercices/jour). Si tu passes à un modèle payant : ~0,005 € par génération + ~0,002 € par correction (Claude Haiku 4.5 via OpenRouter), soit ~0,01 €/exercice complet.
 
 ## Scripts
 

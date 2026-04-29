@@ -1,12 +1,21 @@
 // Edge Function : generate-exercise
-// Génère un texte à trous via LLM (OpenRouter), valide la sortie programmatiquement
+// Génère un texte à trous via LLM, valide la sortie programmatiquement
 // avec retry max 2, et persiste dans la table `exercises`.
+//
+// Provider-agnostique : utilise n'importe quelle API compatible OpenAI
+// (Gemini, OpenRouter, Anthropic compat layer, Mistral, OpenAI lui-même).
+// Configuré via les secrets Supabase :
+//   LLM_API_KEY  — clé d'API du provider
+//   LLM_BASE_URL — base URL (défaut : Gemini OpenAI compat)
+//   LLM_MODEL    — modèle (défaut : gemini-2.0-flash)
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 
-const MODEL = Deno.env.get('LLM_MODEL') ?? 'anthropic/claude-haiku-4-5';
+const MODEL = Deno.env.get('LLM_MODEL') ?? 'gemini-2.0-flash';
+const LLM_BASE_URL =
+	Deno.env.get('LLM_BASE_URL') ?? 'https://generativelanguage.googleapis.com/v1beta/openai';
 const MAX_ATTEMPTS = 3; // 1 essai + 2 retries
 
 interface GenerateRequest {
@@ -72,9 +81,9 @@ serve(async (req) => {
 			return jsonResponse({ error: `Règle introuvable : ${body.rule_id}` }, 404);
 		}
 
-		const apiKey = Deno.env.get('OPENROUTER_API_KEY');
+		const apiKey = Deno.env.get('LLM_API_KEY');
 		if (!apiKey) {
-			console.error('OPENROUTER_API_KEY non configuré.');
+			console.error('LLM_API_KEY non configuré.');
 			return jsonResponse({ error: 'Configuration serveur incomplète.' }, 500);
 		}
 
@@ -254,13 +263,11 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 		}
 	];
 
-	const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+	const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
 		method: 'POST',
 		headers: {
 			Authorization: `Bearer ${apiKey}`,
-			'Content-Type': 'application/json',
-			'HTTP-Referer': 'https://gramgame.app',
-			'X-Title': 'Gramgame'
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			model: MODEL,
@@ -277,13 +284,13 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 
 	if (!response.ok) {
 		const errText = await response.text();
-		throw new Error(`OpenRouter HTTP ${response.status} : ${errText.slice(0, 300)}`);
+		throw new Error(`LLM HTTP ${response.status} : ${errText.slice(0, 300)}`);
 	}
 
 	const json = await response.json();
 	const toolCall = json.choices?.[0]?.message?.tool_calls?.[0];
 	if (!toolCall) {
-		throw new Error('Pas de tool_call dans la réponse OpenRouter.');
+		throw new Error('Pas de tool_call dans la réponse LLM.');
 	}
 	let args: unknown;
 	try {

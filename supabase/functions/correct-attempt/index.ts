@@ -6,7 +6,9 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 
-const MODEL = Deno.env.get('LLM_MODEL') ?? 'anthropic/claude-haiku-4-5';
+const MODEL = Deno.env.get('LLM_MODEL') ?? 'gemini-2.0-flash';
+const LLM_BASE_URL =
+	Deno.env.get('LLM_BASE_URL') ?? 'https://generativelanguage.googleapis.com/v1beta/openai';
 
 interface CorrectRequest {
 	exercise_id: string;
@@ -84,8 +86,8 @@ serve(async (req) => {
 		// avec un fallback déterministe pour ne pas bloquer le retour à l'élève.
 		let appreciation = '';
 		try {
-			const apiKey = Deno.env.get('OPENROUTER_API_KEY');
-			if (!apiKey) throw new Error('OPENROUTER_API_KEY manquante');
+			const apiKey = Deno.env.get('LLM_API_KEY');
+			if (!apiKey) throw new Error('LLM_API_KEY manquante');
 			appreciation = await generateAppreciation(apiKey, exercise, rule as RuleRow, grading);
 		} catch (e) {
 			console.warn('Appréciation LLM échouée, fallback', e);
@@ -184,13 +186,11 @@ Ton attendu : ${toneHint}
 
 Écris UNE SEULE appréciation courte (3-5 phrases maximum), en français, ton bienveillant et encourageant. Tutoie l'élève. Si pertinent, glisse une astuce mémo pour la règle (ex : « où prend un accent quand il indique un lieu ; ou ne sert qu'à donner le choix »). Pas de formule mécanique, sois naturel. Réponds uniquement avec l'appréciation, sans préambule.`;
 
-	const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+	const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
 		method: 'POST',
 		headers: {
 			Authorization: `Bearer ${apiKey}`,
-			'Content-Type': 'application/json',
-			'HTTP-Referer': 'https://gramgame.app',
-			'X-Title': 'Gramgame'
+			'Content-Type': 'application/json'
 		},
 		body: JSON.stringify({
 			model: MODEL,
@@ -201,7 +201,7 @@ Ton attendu : ${toneHint}
 	});
 
 	if (!response.ok) {
-		throw new Error(`OpenRouter HTTP ${response.status}`);
+		throw new Error(`LLM HTTP ${response.status}`);
 	}
 	const json = await response.json();
 	const text = json.choices?.[0]?.message?.content;
