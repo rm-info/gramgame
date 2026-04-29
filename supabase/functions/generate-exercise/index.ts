@@ -106,6 +106,8 @@ serve(async (req) => {
 
 		let exercise: ToolOutput | null = null;
 		let lastError = '';
+		let providerErrorStatus: number | null = null;
+
 		for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 			try {
 				const candidate = await callLLM(apiKey, rule as Rule, body, attempt);
@@ -117,12 +119,47 @@ serve(async (req) => {
 				lastError = validationError;
 				console.warn(`Tentative ${attempt + 1} invalide : ${validationError}`);
 			} catch (e) {
-				lastError = (e as Error).message;
+				const err = e as Error & { providerStatus?: number };
+				lastError = err.message;
 				console.warn(`Tentative ${attempt + 1} a échoué : ${lastError}`);
+				if (err.providerStatus !== undefined) {
+					// Erreur côté provider (429, 401, 5xx…) : ne pas retry, c'est pas une
+					// question de prompt mais de configuration / rate limit / quota.
+					providerErrorStatus = err.providerStatus;
+					break;
+				}
 			}
 		}
 
 		if (!exercise) {
+			if (providerErrorStatus === 429) {
+				return jsonResponse(
+					{
+						error:
+							"Quota du provider LLM dépassé pour le moment. Patiente quelques minutes (rate limit par minute) ou vérifie ton quota journalier.",
+						debug: lastError
+					},
+					429
+				);
+			}
+			if (providerErrorStatus === 401 || providerErrorStatus === 403) {
+				return jsonResponse(
+					{
+						error: 'Clé API LLM invalide ou non autorisée côté serveur.',
+						debug: lastError
+					},
+					providerErrorStatus
+				);
+			}
+			if (providerErrorStatus !== null) {
+				return jsonResponse(
+					{
+						error: `Le provider LLM a renvoyé une erreur (HTTP ${providerErrorStatus}). Réessaie dans un instant.`,
+						debug: lastError
+					},
+					502
+				);
+			}
 			return jsonResponse(
 				{
 					error:
@@ -302,7 +339,11 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 
 	if (!response.ok) {
 		const errText = await response.text();
-		throw new Error(`LLM HTTP ${response.status} : ${errText.slice(0, 300)}`);
+		const err = new Error(`LLM HTTP ${response.status} : ${errText.slice(0, 300)}`) as Error & {
+			providerStatus?: number;
+		};
+		err.providerStatus = response.status;
+		throw err;
 	}
 
 	const json = await response.json();
