@@ -52,7 +52,12 @@ export async function invokeFunction<T>(
 			typeof (parsed as { error: unknown }).error === 'string'
 		) {
 			const friendly = (parsed as { error: string }).error.trim();
-			if (friendly) throw new Error(friendly);
+			const debug = (parsed as { debug?: unknown }).debug;
+			if (friendly) {
+				const debugStr =
+					typeof debug === 'string' && debug.trim() ? ` (détail : ${debug})` : '';
+				throw new Error(`${friendly}${debugStr}`);
+			}
 		}
 		throw new Error(
 			`Erreur serveur (HTTP ${response.status}). Réessaie dans un instant.`
