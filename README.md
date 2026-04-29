@@ -53,13 +53,14 @@ L'app est accessible sur <http://localhost:5173>.
 
 ### 2. Appliquer le schéma SQL
 
-Avec la CLI Supabase :
+La CLI Supabase est installée comme **dev-dependency du projet** (déjà via `npm install`). On l'invoque avec `npx supabase ...`.
+
+> Note : Supabase bloque explicitement l'install globale via npm — voir <https://github.com/supabase/cli#install-the-cli>. La méthode locale est plus propre (CLI versionnée avec le projet via `package-lock.json`).
 
 ```sh
-npm install -g supabase
-supabase login
-supabase link --project-ref <votre-project-ref>
-supabase db push
+npx supabase login
+npx supabase link --project-ref <votre-project-ref>
+npx supabase db push
 ```
 
 Ou : copier le contenu de `supabase/migrations/0001_initial_schema.sql` puis `0002_seed_rules.sql` dans **SQL Editor** sur l'interface Supabase et exécuter.
@@ -74,7 +75,7 @@ L'app utilise **n'importe quelle API compatible OpenAI** via 3 secrets Supabase.
 2. La stocker comme secret Supabase :
 
 ```sh
-supabase secrets set LLM_API_KEY=AIza...
+npx supabase secrets set LLM_API_KEY=AIza...
 ```
 
 C'est tout — `LLM_BASE_URL` et `LLM_MODEL` ont déjà des défauts Gemini-friendly (`gemini-2.0-flash`). Free tier : 15 req/min, 1500 req/jour.
@@ -82,9 +83,9 @@ C'est tout — `LLM_BASE_URL` et `LLM_MODEL` ont déjà des défauts Gemini-frie
 **Option B — OpenRouter (multi-modèles, ~0,01 €/exercice avec Claude Haiku)**
 
 ```sh
-supabase secrets set LLM_API_KEY=sk-or-v1-xxxxx
-supabase secrets set LLM_BASE_URL=https://openrouter.ai/api/v1
-supabase secrets set LLM_MODEL=anthropic/claude-haiku-4-5
+npx supabase secrets set LLM_API_KEY=sk-or-v1-xxxxx
+npx supabase secrets set LLM_BASE_URL=https://openrouter.ai/api/v1
+npx supabase secrets set LLM_MODEL=anthropic/claude-haiku-4-5
 ```
 
 OpenRouter propose aussi des modèles `:free` (Llama, Mistral, Qwen) à $0 avec rate limits — voir <https://openrouter.ai/models?max_price=0>.
@@ -96,8 +97,9 @@ Même principe : 3 secrets pour pointer vers leur endpoint OpenAI-compatible et 
 ### 4. Déployer les Edge Functions
 
 ```sh
-supabase functions deploy generate-exercise
-supabase functions deploy correct-attempt
+npx supabase functions deploy signin
+npx supabase functions deploy generate-exercise
+npx supabase functions deploy correct-attempt
 ```
 
 ### 5. Vérification locale
