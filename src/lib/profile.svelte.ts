@@ -3,45 +3,67 @@ import { auth } from './auth.svelte';
 
 export interface UserProfile {
 	user_id: string;
-	display_name: string;
 	grade_level: string;
 	created_at: string;
 }
 
+export interface UsernameRow {
+	username: string;
+}
+
 class ProfileState {
 	profile: UserProfile | null = $state(null);
+	username: string | null = $state(null);
 	loading = $state(false);
 	loaded = $state(false);
 
 	async load() {
 		if (!auth.user) {
 			this.profile = null;
+			this.username = null;
 			this.loaded = true;
 			return;
 		}
 		this.loading = true;
-		const { data, error } = await supabase
-			.from('user_profiles')
-			.select('*')
-			.eq('user_id', auth.user.id)
-			.maybeSingle();
+
+		// Charge en parallèle : profil pédagogique + username
+		const [profileRes, usernameRes] = await Promise.all([
+			supabase
+				.from('user_profiles')
+				.select('user_id, grade_level, created_at')
+				.eq('user_id', auth.user.id)
+				.maybeSingle(),
+			supabase
+				.from('usernames')
+				.select('username')
+				.eq('auth_email', auth.user.email)
+				.maybeSingle()
+		]);
+
 		this.loading = false;
 		this.loaded = true;
-		if (error) {
-			console.error('Failed to load profile', error);
+
+		if (profileRes.error) {
+			console.error('Failed to load profile', profileRes.error);
 			this.profile = null;
-			return;
+		} else {
+			this.profile = profileRes.data;
 		}
-		this.profile = data;
+
+		if (usernameRes.error) {
+			console.error('Failed to load username', usernameRes.error);
+			this.username = null;
+		} else {
+			this.username = usernameRes.data?.username ?? null;
+		}
 	}
 
-	async upsert(displayName: string, gradeLevel: string) {
+	async upsertGradeLevel(gradeLevel: string) {
 		if (!auth.user) throw new Error('Pas de session active.');
 		const { data, error } = await supabase
 			.from('user_profiles')
 			.upsert({
 				user_id: auth.user.id,
-				display_name: displayName,
 				grade_level: gradeLevel
 			})
 			.select()
@@ -52,6 +74,7 @@ class ProfileState {
 
 	reset() {
 		this.profile = null;
+		this.username = null;
 		this.loaded = false;
 	}
 }

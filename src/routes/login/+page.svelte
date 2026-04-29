@@ -1,30 +1,32 @@
 <script lang="ts">
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { loginWithUsername } from '$lib/api/signin';
 
-	let email = $state('');
+	let username = $state('');
 	let submitting = $state(false);
 	let sent = $state(false);
+	let emailHint = $state('');
 	let errorMsg = $state<string | null>(null);
 
 	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
-		if (!email.trim()) return;
+		const u = username.trim().toLowerCase();
+		if (!u) return;
 		submitting = true;
 		errorMsg = null;
 
-		const redirectTo = `${window.location.origin}${base}/auth-callback`;
-		const { error } = await supabase.auth.signInWithOtp({
-			email: email.trim(),
-			options: { emailRedirectTo: redirectTo }
-		});
-
-		submitting = false;
-		if (error) {
-			errorMsg = error.message;
-			return;
+		try {
+			const result = await loginWithUsername({
+				username: u,
+				redirect_to: `${window.location.origin}${base}/auth-callback`
+			});
+			emailHint = result.email_hint;
+			sent = true;
+		} catch (e) {
+			errorMsg = (e as Error).message;
+		} finally {
+			submitting = false;
 		}
-		sent = true;
 	}
 </script>
 
@@ -35,8 +37,8 @@
 		<div class="card stack">
 			<h2>Lien envoyé !</h2>
 			<p>
-				Un lien de connexion a été envoyé à <strong>{email}</strong>. Ouvre ta boîte mail et clique
-				sur le lien.
+				Un lien de connexion a été envoyé à <strong>{emailHint}</strong>. Ouvre ta boîte mail et
+				clique sur le lien.
 			</p>
 			<p class="muted">
 				Le lien fonctionne pendant 1 heure. Si tu ne le vois pas, vérifie ton dossier spam.
@@ -46,17 +48,20 @@
 		<div class="card stack">
 			<form onsubmit={handleSubmit} class="stack">
 				<div>
-					<label for="email">Adresse email</label>
+					<label for="username">Nom d'utilisateur</label>
 					<input
-						id="email"
-						type="email"
-						bind:value={email}
-						placeholder="ton-email@exemple.fr"
+						id="username"
+						type="text"
+						bind:value={username}
+						placeholder="ton-username"
 						required
-						autocomplete="email"
+						autocomplete="username"
+						autocapitalize="off"
+						spellcheck="false"
+						maxlength="20"
 					/>
 				</div>
-				<button type="submit" disabled={submitting || !email.trim()}>
+				<button type="submit" disabled={submitting || !username.trim()}>
 					{submitting ? 'Envoi…' : 'Recevoir un lien magique'}
 				</button>
 				{#if errorMsg}
@@ -65,27 +70,8 @@
 			</form>
 		</div>
 
-		<details class="card">
-			<summary><strong>Plusieurs apprenants dans la famille ?</strong></summary>
-			<div class="stack" style="margin-top: var(--space-3);">
-				<p>
-					Tu peux créer un compte distinct pour chaque enfant à partir d'<strong
-						>une seule boîte mail</strong
-					>, en utilisant l'astuce du <code>+</code> :
-				</p>
-				<ul>
-					<li><code>parent+lea@gmail.com</code> → compte de Léa</li>
-					<li><code>parent+tom@gmail.com</code> → compte de Tom</li>
-				</ul>
-				<p>
-					Tous les emails arrivent dans <code>parent@gmail.com</code>, mais Gramgame voit deux
-					comptes indépendants. Chaque enfant a sa progression à lui.
-				</p>
-				<p class="muted">
-					Astuce valable sur Gmail, Outlook, ProtonMail, Fastmail. Certaines messageries
-					d'opérateur (Orange, SFR…) peuvent ne pas le supporter.
-				</p>
-			</div>
-		</details>
+		<p class="muted">
+			Pas encore de compte ? <a href={`${base}/signup`}>Crée-en un</a>.
+		</p>
 	{/if}
 </section>

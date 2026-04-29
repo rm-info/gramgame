@@ -57,8 +57,8 @@
 
 <section class="container stack">
 	<h1>
-		{#if profileState.profile}
-			Salut {profileState.profile.display_name} !
+		{#if profileState.username}
+			Salut {profileState.username} !
 		{:else}
 			Bienvenue
 		{/if}

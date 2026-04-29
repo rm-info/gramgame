@@ -10,7 +10,7 @@
 
 	let { children } = $props();
 
-	const PUBLIC_ROUTES = new Set(['/login', '/auth-callback']);
+	const PUBLIC_ROUTES = new Set(['/login', '/signup', '/auth-callback']);
 
 	onMount(async () => {
 		await auth.init();
@@ -50,9 +50,9 @@
 <header class="topbar">
 	<div class="container topbar-inner">
 		<a href={`${base}/`} class="brand">Gramgame</a>
-		{#if auth.user && profileState.profile}
+		{#if auth.user && profileState.username}
 			<nav class="nav">
-				<span class="muted">Bonjour {profileState.profile.display_name}</span>
+				<span class="muted">Bonjour {profileState.username}</span>
 				<button type="button" class="secondary" onclick={handleSignOut}>Déconnexion</button>
 			</nav>
 		{/if}

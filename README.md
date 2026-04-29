@@ -118,16 +118,13 @@ Aller sur <http://localhost:5173>, créer un compte par magic link, faire l'onbo
 4. Pousser sur `main` → le workflow `.github/workflows/deploy.yml` se déclenche, build le site sous `/gramgame/` et le publie.
 5. Mettre à jour les **Redirect URLs** Supabase pour inclure `https://<votre-user>.github.io/gramgame/auth-callback`.
 
-## Plusieurs apprenants dans une famille
+## Modèle d'authentification
 
-Pas de notion de "compte familial" dans le MVP, mais l'astuce du sub-addressing email permet à un parent de créer un compte distinct pour chaque enfant à partir d'**une seule boîte mail** :
+- **Inscription** : nom d'utilisateur (3-20 caractères, lettres/chiffres/-/_) + email.
+- **Connexion** : nom d'utilisateur seul. Le système retrouve l'email associé et envoie un magic link.
+- **Plusieurs apprenants dans une famille** : un même email peut être réutilisé pour plusieurs noms d'utilisateur distincts (ex : "lea" et "tom" partagent `parent@gmail.com`). Chaque compte a sa progression à lui ; les magic links arrivent tous dans la même boîte mail.
 
-- `parent+lea@gmail.com` → compte de Léa
-- `parent+tom@gmail.com` → compte de Tom
-
-Tous les emails arrivent dans `parent@gmail.com`, mais Gramgame voit deux comptes indépendants. Chaque enfant a sa progression.
-
-L'astuce est documentée dans la page de connexion de l'app.
+**Détail technique caché** : Supabase Auth impose `auth.users.email` unique. L'edge function `signin` synthétise donc en interne un email sub-adressé (ex : `parent+gramgame-lea@gmail.com`) à partir de l'email réel et du username. L'utilisateur ne voit jamais cette transformation — il fournit son email tel quel et le magic link arrive bien dans sa boîte (le `+gramgame-...` est ignoré au routage SMTP).
 
 ## Ajouter une règle de grammaire
 

@@ -1,13 +1,46 @@
 -- Gramgame — schéma initial
--- Tables : user_profiles, rules, exercises, attempts
+-- Tables : usernames, user_profiles, rules, exercises, attempts
 -- Toutes les tables (sauf rules en lecture) sont protégées par RLS.
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- usernames : handles globalement uniques + mapping email réel ↔ email auth
+-- ────────────────────────────────────────────────────────────────────────────
+-- Pour permettre à plusieurs apprenants (typiquement frères/sœurs) de partager
+-- une seule boîte mail, on synthétise en interne un "auth_email" sub-adressé
+-- (ex : parent+gramgame-lea@gmail.com). L'utilisateur ne voit jamais cette
+-- transformation : il fournit son email réel à l'inscription, et son username
+-- seul à la connexion.
+--
+-- Cette table est gérée exclusivement par l'edge function `signin` (avec la
+-- service_role_key), jamais directement par le client — pour empêcher
+-- l'énumération de usernames et le spam de magic links.
+create table public.usernames (
+  username text primary key
+    check (username ~ '^[a-z0-9_-]{3,20}$'),
+  real_email text not null
+    check (real_email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+  auth_email text not null unique
+    check (auth_email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+  created_at timestamptz not null default now()
+);
+
+create index idx_usernames_real_email on public.usernames(real_email);
+
+alter table public.usernames enable row level security;
+
+-- L'utilisateur authentifié peut lire SA ligne (matchée par email du JWT).
+-- Aucune policy d'INSERT/UPDATE pour anon : tout passe par l'edge function.
+create policy "usernames_self_read"
+  on public.usernames for select
+  using ((select auth.jwt() ->> 'email') = auth_email);
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- user_profiles : profil applicatif rattaché 1-1 à auth.users
 -- ────────────────────────────────────────────────────────────────────────────
+-- Le nom affiché vient de `usernames.username`. Ici on ne stocke que les
+-- préférences pédagogiques (grade_level pour adapter la difficulté).
 create table public.user_profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  display_name text not null check (length(display_name) between 1 and 40),
   grade_level text not null,
   created_at timestamptz not null default now()
 );
