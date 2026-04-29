@@ -1,48 +1,63 @@
+import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_PUBLISHABLE_KEY } from '$env/static/public';
 import { supabase } from '$lib/supabase';
 
 /**
- * Appelle une edge function Supabase et déballe son corps de réponse.
- * En cas d'erreur HTTP non-2xx, tente d'extraire le champ `error` du corps JSON
- * pour rendre le message lisible à l'utilisateur final.
+ * Appelle une edge function Supabase via fetch direct, pour avoir un contrôle
+ * total sur la lecture du corps de réponse — y compris en cas d'erreur HTTP.
+ *
+ * Pourquoi pas `supabase.functions.invoke` : selon la version de supabase-js,
+ * invoke consomme le body de la Response en interne et renvoie `data: null`
+ * sur non-2xx, rendant le message d'erreur structuré ({ error: "..." }) du
+ * backend irrécupérable. En passant par fetch direct on évite ce piège.
  */
 export async function invokeFunction<T>(
 	name: string,
 	body: Record<string, unknown>
 ): Promise<T> {
-	const { data, error } = await supabase.functions.invoke(name, { body });
-	if (error) {
-		throw new Error(await extractFriendlyMessage(error));
-	}
-	return data as T;
-}
+	const session = (await supabase.auth.getSession()).data.session;
+	const accessToken = session?.access_token ?? PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-/**
- * Récupère un message d'erreur "human-friendly" en lisant le corps de la
- * réponse HTTP. Volontairement basé sur du duck-typing plutôt que sur
- * `instanceof FunctionsHttpError` pour éviter les pièges de modules dupliqués
- * dans le bundle (l'import local et l'import du SDK peuvent être deux classes
- * différentes en mémoire et faire échouer `instanceof`).
- */
-async function extractFriendlyMessage(error: unknown): Promise<string> {
-	if (error && typeof error === 'object' && 'context' in error) {
-		const ctx = (error as { context?: unknown }).context;
-		if (ctx && typeof (ctx as Response).clone === 'function') {
-			try {
-				const body = await (ctx as Response).clone().json();
-				if (body && typeof body === 'object' && 'error' in body) {
-					const val = (body as { error: unknown }).error;
-					if (typeof val === 'string' && val.trim()) return val;
-				}
-			} catch {
-				// Corps non-JSON ou non parsable : on retombe sur le message d'origine.
-			}
+	const url = `${PUBLIC_SUPABASE_URL}/functions/v1/${name}`;
+
+	let response: Response;
+	try {
+		response = await fetch(url, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				apikey: PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+				Authorization: `Bearer ${accessToken}`
+			},
+			body: JSON.stringify(body)
+		});
+	} catch {
+		throw new Error('Erreur réseau. Vérifie ta connexion.');
+	}
+
+	let parsed: unknown = null;
+	const text = await response.text();
+	if (text) {
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			// Corps non-JSON (probable page d'erreur HTML de la plateforme)
 		}
 	}
-	if (error instanceof Error && error.message) {
-		if (error.message.includes('non-2xx status code')) {
-			return "L'opération a échoué côté serveur. Réessaie dans un instant.";
+
+	if (!response.ok) {
+		if (
+			parsed &&
+			typeof parsed === 'object' &&
+			'error' in parsed &&
+			typeof (parsed as { error: unknown }).error === 'string'
+		) {
+			const friendly = (parsed as { error: string }).error.trim();
+			if (friendly) throw new Error(friendly);
 		}
-		return error.message;
+		throw new Error(
+			`Erreur serveur (HTTP ${response.status}). Réessaie dans un instant.`
+		);
 	}
-	return 'Erreur réseau. Vérifie ta connexion.';
+
+	return parsed as T;
 }
