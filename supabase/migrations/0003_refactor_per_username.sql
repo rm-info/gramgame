@@ -11,12 +11,14 @@
 -- ────────────────────────────────────────────────────────────────────────────
 -- usernames : drop auth_email, ajoute user_id (NULL avant claim)
 -- ────────────────────────────────────────────────────────────────────────────
+-- L'ancienne policy référence auth_email dans son `using`, on doit donc la
+-- drop AVANT de retirer la colonne (sinon Postgres refuse, dépendance).
+drop policy if exists "usernames_self_read" on public.usernames;
+
 alter table public.usernames drop column auth_email;
 alter table public.usernames
   add column user_id uuid references auth.users(id) on delete set null;
 create index idx_usernames_user_id on public.usernames(user_id);
-
-drop policy if exists "usernames_self_read" on public.usernames;
 
 -- L'utilisateur peut lire les lignes qu'il possède (claim posé)
 create policy "usernames_self_read"
