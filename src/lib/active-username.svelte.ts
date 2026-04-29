@@ -71,37 +71,44 @@ class ActiveUsernameState {
 	async claim(name: string): Promise<{ ok: boolean; reason?: string }> {
 		if (!auth.user) return { ok: false, reason: 'Pas de session.' };
 
-		// On essaie d'updater. RLS autorise seulement si user_id IS NULL et
-		// JWT email = real_email.
-		const { data, error } = await supabase
+		// 1. UPDATE — RLS autorise seulement si user_id IS NULL et JWT email = real_email.
+		const { data: updated, error: updateError } = await supabase
 			.from('usernames')
 			.update({ user_id: auth.user.id })
 			.eq('username', name)
 			.is('user_id', null)
 			.select();
 
-		if (error) {
-			console.error('Claim failed', error);
-			return { ok: false, reason: error.message };
+		if (updateError) {
+			console.error('Claim UPDATE failed', updateError);
+			return { ok: false, reason: updateError.message };
 		}
 
-		// Si data est vide, soit la ligne n'existe pas, soit elle est déjà claim.
-		// On vérifie l'état actuel.
-		if (!data || data.length === 0) {
-			const { data: existing } = await supabase
-				.from('usernames')
-				.select('user_id')
-				.eq('username', name)
-				.maybeSingle();
-			if (!existing) {
-				return { ok: false, reason: 'Username inconnu.' };
-			}
-			if (existing.user_id !== auth.user.id) {
-				return { ok: false, reason: 'Ce username appartient à un autre compte.' };
-			}
-			// Déjà claim par nous-mêmes, OK.
+		if (updated && updated.length > 0) {
+			return { ok: true };
 		}
-		return { ok: true };
+
+		// 2. UPDATE n'a rien mis à jour. On essaie de voir l'état actuel via SELECT.
+		// RLS sur SELECT autorise seulement si auth.uid() = user_id (déjà claim par nous).
+		const { data: existing } = await supabase
+			.from('usernames')
+			.select('user_id')
+			.eq('username', name)
+			.maybeSingle();
+
+		if (existing && existing.user_id === auth.user.id) {
+			// Déjà claim par nous-mêmes, OK.
+			return { ok: true };
+		}
+
+		// 3. Ni update ni read : soit la ligne n'existe pas, soit elle est claim
+		// par quelqu'un d'autre, soit (le plus probable) l'email JWT ne match pas
+		// real_email — auquel cas la ligne existe mais nous est invisible. Le
+		// message expose l'email de la session pour aider à debug.
+		return {
+			ok: false,
+			reason: `impossible de revendiquer ce compte. Email de session : « ${auth.user.email ?? '?'} ». Si l'inscription a été faite avec un email différent, fais une nouvelle inscription propre.`
+		};
 	}
 
 	reset() {
