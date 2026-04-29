@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { supabase } from '$lib/supabase';
+	import { activeUsername } from '$lib/active-username.svelte';
 	import ExerciseText from '$lib/components/ExerciseText.svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { correctAttempt, type CorrectionResult } from '$lib/api/correct';
@@ -80,8 +81,15 @@
 			if (val !== null) payload[pos] = val;
 		}
 
+		const username = activeUsername.username;
+		if (!username) {
+			submitError = "Aucun compte actif. Reconnecte-toi.";
+			submitting = false;
+			return;
+		}
 		try {
 			result = await correctAttempt({
+				username,
 				exercise_id: exercise.id,
 				responses: payload
 			});

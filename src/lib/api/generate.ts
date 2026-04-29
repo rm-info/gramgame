@@ -1,6 +1,7 @@
 import { invokeFunction } from './_helpers';
 
 export interface GenerateInput {
+	username: string;
 	rule_id: string;
 	theme: string;
 	grade_level: string;

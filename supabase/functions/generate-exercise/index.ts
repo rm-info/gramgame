@@ -19,6 +19,7 @@ const LLM_BASE_URL =
 const MAX_ATTEMPTS = 3; // 1 essai + 2 retries
 
 interface GenerateRequest {
+	username: string;
 	rule_id: string;
 	theme: string;
 	grade_level: string;
@@ -72,6 +73,22 @@ serve(async (req) => {
 		const reqError = validateRequest(body);
 		if (reqError) return jsonResponse({ error: reqError }, 400);
 
+		// Vérifie que l'utilisateur possède bien le username demandé.
+		// RLS sur usernames autorise les SELECT seulement sur les lignes
+		// dont user_id = auth.uid(). Une ligne absente = pas autorisé.
+		const { data: ownedUsername } = await supabase
+			.from('usernames')
+			.select('username')
+			.eq('username', body.username)
+			.eq('user_id', user.id)
+			.maybeSingle();
+		if (!ownedUsername) {
+			return jsonResponse(
+				{ error: "Tu n'as pas accès à ce compte d'apprenant." },
+				403
+			);
+		}
+
 		const { data: rule, error: ruleError } = await supabase
 			.from('rules')
 			.select('*')
@@ -119,7 +136,7 @@ serve(async (req) => {
 		const { data: row, error: insertError } = await supabase
 			.from('exercises')
 			.insert({
-				created_by: user.id,
+				created_by_username: body.username,
 				rule_id: rule.id,
 				theme: body.theme,
 				grade_level: body.grade_level,
@@ -156,6 +173,7 @@ serve(async (req) => {
 function validateRequest(body: unknown): string | null {
 	if (!body || typeof body !== 'object') return 'Corps de requête invalide.';
 	const b = body as Record<string, unknown>;
+	if (typeof b.username !== 'string' || !b.username) return 'username requis.';
 	if (typeof b.rule_id !== 'string' || !b.rule_id) return 'rule_id requis.';
 	if (typeof b.theme !== 'string' || b.theme.trim().length < 2) return 'theme invalide.';
 	if (typeof b.grade_level !== 'string' || !b.grade_level) return 'grade_level requis.';

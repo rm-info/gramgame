@@ -1,16 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import { supabase } from '$lib/supabase';
 	import { auth } from '$lib/auth.svelte';
+	import { activeUsername } from '$lib/active-username.svelte';
 	import { profileState } from '$lib/profile.svelte';
 
 	let errorMsg = $state<string | null>(null);
 
 	onMount(async () => {
-		// Le client Supabase capte automatiquement le hash (detectSessionInUrl)
-		// et déclenche onAuthStateChange. On attend que la session soit posée.
 		const { data, error } = await supabase.auth.getSession();
 		if (error) {
 			errorMsg = error.message;
@@ -21,11 +21,29 @@
 			return;
 		}
 
-		// Synchronise notre store et charge le profil pour décider de la destination.
 		await auth.init();
+
+		// Le username est passé en query param par l'edge function signin.
+		const requestedUsername = page.url.searchParams.get('username');
+
+		if (requestedUsername) {
+			// Tente de claim (idempotent) puis active.
+			const claim = await activeUsername.claim(requestedUsername);
+			if (!claim.ok) {
+				errorMsg = `Impossible d'activer le compte « ${requestedUsername} » : ${claim.reason ?? 'erreur inconnue'}.`;
+				return;
+			}
+		}
+
+		await activeUsername.load();
+
+		if (requestedUsername && activeUsername.available.includes(requestedUsername)) {
+			activeUsername.set(requestedUsername);
+		}
+
 		await profileState.load();
 
-		if (profileState.profile) {
+		if (profileState.gradeLevel) {
 			goto(`${base}/`, { replaceState: true });
 		} else {
 			goto(`${base}/onboarding`, { replaceState: true });

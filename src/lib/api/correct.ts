@@ -1,6 +1,7 @@
 import { invokeFunction } from './_helpers';
 
 export interface CorrectInput {
+	username: string;
 	exercise_id: string;
 	responses: Record<string, string>;
 }

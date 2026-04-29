@@ -1,81 +1,53 @@
 import { supabase } from './supabase';
-import { auth } from './auth.svelte';
-
-export interface UserProfile {
-	user_id: string;
-	grade_level: string;
-	created_at: string;
-}
-
-export interface UsernameRow {
-	username: string;
-}
+import { activeUsername } from './active-username.svelte';
 
 class ProfileState {
-	profile: UserProfile | null = $state(null);
-	username: string | null = $state(null);
+	gradeLevel: string | null = $state(null);
 	loading = $state(false);
 	loaded = $state(false);
+	loadedFor: string | null = $state(null);
 
 	async load() {
-		if (!auth.user) {
-			this.profile = null;
-			this.username = null;
+		const username = activeUsername.username;
+		if (!username) {
+			this.gradeLevel = null;
 			this.loaded = true;
+			this.loadedFor = null;
 			return;
 		}
 		this.loading = true;
-
-		// Charge en parallèle : profil pédagogique + username
-		const [profileRes, usernameRes] = await Promise.all([
-			supabase
-				.from('user_profiles')
-				.select('user_id, grade_level, created_at')
-				.eq('user_id', auth.user.id)
-				.maybeSingle(),
-			supabase
-				.from('usernames')
-				.select('username')
-				.eq('auth_email', auth.user.email)
-				.maybeSingle()
-		]);
-
-		this.loading = false;
-		this.loaded = true;
-
-		if (profileRes.error) {
-			console.error('Failed to load profile', profileRes.error);
-			this.profile = null;
-		} else {
-			this.profile = profileRes.data;
-		}
-
-		if (usernameRes.error) {
-			console.error('Failed to load username', usernameRes.error);
-			this.username = null;
-		} else {
-			this.username = usernameRes.data?.username ?? null;
-		}
-	}
-
-	async upsertGradeLevel(gradeLevel: string) {
-		if (!auth.user) throw new Error('Pas de session active.');
 		const { data, error } = await supabase
 			.from('user_profiles')
-			.upsert({
-				user_id: auth.user.id,
-				grade_level: gradeLevel
-			})
-			.select()
-			.single();
+			.select('grade_level')
+			.eq('username', username)
+			.maybeSingle();
+		this.loading = false;
+		this.loaded = true;
+		this.loadedFor = username;
+		if (error) {
+			console.error('Failed to load profile', error);
+			this.gradeLevel = null;
+			return;
+		}
+		this.gradeLevel = data?.grade_level ?? null;
+	}
+
+	async upsertGradeLevel(grade: string) {
+		const username = activeUsername.username;
+		if (!username) throw new Error('Pas de username actif.');
+		const { error } = await supabase
+			.from('user_profiles')
+			.upsert({ username, grade_level: grade });
 		if (error) throw error;
-		this.profile = data;
+		this.gradeLevel = grade;
+		this.loaded = true;
+		this.loadedFor = username;
 	}
 
 	reset() {
-		this.profile = null;
-		this.username = null;
+		this.gradeLevel = null;
 		this.loaded = false;
+		this.loadedFor = null;
 	}
 }
 

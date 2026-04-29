@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { supabase } from '$lib/supabase';
-	import { profileState } from '$lib/profile.svelte';
+	import { activeUsername } from '$lib/active-username.svelte';
 
 	interface AttemptRow {
 		id: string;
@@ -20,8 +19,15 @@
 	let attempts = $state<AttemptRow[]>([]);
 	let loadingAttempts = $state(true);
 
-	onMount(async () => {
-		const { data, error } = await supabase
+	$effect(() => {
+		const username = activeUsername.username;
+		if (!username) {
+			attempts = [];
+			loadingAttempts = false;
+			return;
+		}
+		loadingAttempts = true;
+		supabase
 			.from('attempts')
 			.select(
 				`id, score, score_total, completed_at,
@@ -30,14 +36,17 @@
 					rule:rules ( display_name )
 				 )`
 			)
+			.eq('username', username)
 			.order('completed_at', { ascending: false })
-			.limit(10);
-		loadingAttempts = false;
-		if (error) {
-			console.error('Failed to load attempts', error);
-			return;
-		}
-		attempts = (data ?? []) as unknown as AttemptRow[];
+			.limit(10)
+			.then(({ data, error }) => {
+				loadingAttempts = false;
+				if (error) {
+					console.error('Failed to load attempts', error);
+					return;
+				}
+				attempts = (data ?? []) as unknown as AttemptRow[];
+			});
 	});
 
 	function formatDate(iso: string) {
@@ -57,8 +66,8 @@
 
 <section class="container stack">
 	<h1>
-		{#if profileState.username}
-			Salut {profileState.username} !
+		{#if activeUsername.username}
+			Salut {activeUsername.username} !
 		{:else}
 			Bienvenue
 		{/if}

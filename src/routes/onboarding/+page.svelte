@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
+	import { activeUsername } from '$lib/active-username.svelte';
 	import { GRADE_LEVELS, profileState } from '$lib/profile.svelte';
 
 	let gradeLevel = $state<string>('CE2');
@@ -26,8 +27,8 @@
 
 <section class="container stack">
 	<h1>
-		{#if profileState.username}
-			Bienvenue {profileState.username} !
+		{#if activeUsername.username}
+			Bienvenue {activeUsername.username} !
 		{:else}
 			Bienvenue !
 		{/if}

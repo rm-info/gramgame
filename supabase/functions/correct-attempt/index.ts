@@ -11,13 +11,14 @@ const LLM_BASE_URL =
 	Deno.env.get('LLM_BASE_URL') ?? 'https://generativelanguage.googleapis.com/v1beta/openai';
 
 interface CorrectRequest {
+	username: string;
 	exercise_id: string;
 	responses: Record<string, string>;
 }
 
 interface ExerciseRow {
 	id: string;
-	created_by: string;
+	created_by_username: string;
 	rule_id: string;
 	theme: string;
 	grade_level: string;
@@ -57,8 +58,28 @@ serve(async (req) => {
 		}
 
 		const body = (await req.json()) as CorrectRequest;
-		if (!body || typeof body.exercise_id !== 'string' || typeof body.responses !== 'object') {
+		if (
+			!body ||
+			typeof body.username !== 'string' ||
+			!body.username ||
+			typeof body.exercise_id !== 'string' ||
+			typeof body.responses !== 'object'
+		) {
 			return jsonResponse({ error: 'Corps de requête invalide.' }, 400);
+		}
+
+		// Vérifie que l'utilisateur possède bien le username demandé.
+		const { data: ownedUsername } = await supabase
+			.from('usernames')
+			.select('username')
+			.eq('username', body.username)
+			.eq('user_id', user.id)
+			.maybeSingle();
+		if (!ownedUsername) {
+			return jsonResponse(
+				{ error: "Tu n'as pas accès à ce compte d'apprenant." },
+				403
+			);
 		}
 
 		const { data: ex, error: exError } = await supabase
@@ -97,7 +118,7 @@ serve(async (req) => {
 		// Persistance
 		const { error: insertError } = await supabase.from('attempts').insert({
 			exercise_id: exercise.id,
-			user_id: user.id,
+			username: body.username,
 			responses: body.responses,
 			score: grading.score,
 			score_total: grading.score_total,

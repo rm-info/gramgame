@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import { supabase } from '$lib/supabase';
+	import { activeUsername } from '$lib/active-username.svelte';
 	import { profileState, GRADE_LEVELS } from '$lib/profile.svelte';
 	import { generateExercise } from '$lib/api/generate';
 
@@ -57,7 +58,7 @@
 
 		ruleId = queryRuleId && rules.some((r) => r.id === queryRuleId) ? queryRuleId : rules[0]?.id ?? '';
 		theme = queryTheme ?? '';
-		gradeLevel = queryGrade ?? profileState.profile?.grade_level ?? 'CE2';
+		gradeLevel = queryGrade ?? profileState.gradeLevel ?? 'CE2';
 		numBlanks = queryNum ? Math.min(30, Math.max(3, Number(queryNum))) : 20;
 	});
 
@@ -67,8 +68,15 @@
 		submitting = true;
 		errorMsg = null;
 
+		const username = activeUsername.username;
+		if (!username) {
+			errorMsg = "Aucun compte actif. Reconnecte-toi.";
+			submitting = false;
+			return;
+		}
 		try {
 			const ex = await generateExercise({
+				username,
 				rule_id: ruleId,
 				theme: theme.trim(),
 				grade_level: gradeLevel,

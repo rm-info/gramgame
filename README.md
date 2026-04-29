@@ -126,7 +126,9 @@ Aller sur <http://localhost:5173>, créer un compte par magic link, faire l'onbo
 - **Connexion** : nom d'utilisateur seul. Le système retrouve l'email associé et envoie un magic link.
 - **Plusieurs apprenants dans une famille** : un même email peut être réutilisé pour plusieurs noms d'utilisateur distincts (ex : "lea" et "tom" partagent `parent@gmail.com`). Chaque compte a sa progression à lui ; les magic links arrivent tous dans la même boîte mail.
 
-**Détail technique caché** : Supabase Auth impose `auth.users.email` unique. L'edge function `signin` synthétise donc en interne un email sub-adressé (ex : `parent+gramgame-lea@gmail.com`) à partir de l'email réel et du username. L'utilisateur ne voit jamais cette transformation — il fournit son email tel quel et le magic link arrive bien dans sa boîte (le `+gramgame-...` est ignoré au routage SMTP).
+**Modèle technique** : 1 email = 1 `auth.users` (Supabase). N usernames possibles peuvent pointer vers le même auth user (table `usernames`, FK `user_id`). À chaque magic link, le username demandé est passé en query param (`?username=lea`) ; au callback, l'app le "claim" (UPDATE usernames SET user_id) et le mémorise comme username actif (localStorage). Toutes les données (profil, exercices, tentatives) sont indexées par username, pas par auth user.
+
+**Conséquence pour un parent** : il reçoit un magic link distinct pour chaque enfant (`/auth-callback?username=lea` puis `/auth-callback?username=tom`), mais sur **la même boîte mail**. Une fois connecté, un sélecteur en haut de l'app permet de basculer d'un compte à l'autre **sans relogin**.
 
 ## Ajouter une règle de grammaire
 

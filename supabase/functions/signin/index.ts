@@ -1,11 +1,14 @@
 // Edge Function : signin
 // Gère l'inscription (mode 'register') et la connexion (mode 'login') par username.
 //
-// 'register' : { username, email, redirect_to } → INSERT dans usernames,
-//              envoie un magic link à l'email auth synthétique (sub-adressé
-//              en interne pour permettre plusieurs comptes par boîte mail).
-// 'login'    : { username, redirect_to } → lookup auth_email depuis username,
-//              envoie un magic link.
+// Modèle : 1 email = 1 auth.users (Supabase). N usernames peuvent pointer vers
+// le même auth user. Le bon username est routé via un paramètre URL dans le
+// magic link, et "claim" en BDD au /auth-callback (UPDATE usernames.user_id).
+//
+// 'register' : { username, email, redirect_to } → INSERT usernames(username,
+//              real_email, user_id=NULL) puis signInWithOtp(email).
+// 'login'    : { username, redirect_to } → lookup real_email depuis username,
+//              signInWithOtp(real_email).
 //
 // Cette fonction utilise la service_role_key pour bypasser RLS sur usernames.
 
@@ -54,7 +57,6 @@ serve(async (req) => {
 			{ auth: { persistSession: false, autoRefreshToken: false } }
 		);
 
-		let authEmail: string;
 		let realEmail: string;
 
 		if (body.mode === 'register') {
@@ -62,16 +64,14 @@ serve(async (req) => {
 			if (!EMAIL_RE.test(email)) {
 				return jsonResponse({ error: 'Adresse email invalide.' }, 400);
 			}
-			authEmail = synthesizeAuthEmail(email, username);
 			realEmail = email;
 
 			// Le PK sur username garantit l'unicité atomiquement.
 			const { error: insertError } = await admin
 				.from('usernames')
-				.insert({ username, real_email: realEmail, auth_email: authEmail });
+				.insert({ username, real_email: realEmail });
 			if (insertError) {
 				if (insertError.code === '23505') {
-					// unique violation : soit username, soit auth_email déjà pris
 					return jsonResponse(
 						{ error: "Ce nom d'utilisateur est déjà pris." },
 						409
@@ -83,7 +83,7 @@ serve(async (req) => {
 		} else {
 			const { data, error } = await admin
 				.from('usernames')
-				.select('auth_email, real_email')
+				.select('real_email')
 				.eq('username', username)
 				.maybeSingle();
 			if (error) {
@@ -96,19 +96,20 @@ serve(async (req) => {
 					404
 				);
 			}
-			authEmail = data.auth_email;
 			realEmail = data.real_email;
 		}
 
-		// Envoi du magic link à l'email auth synthétique.
-		// Supabase Auth crée le user à la première fois, ou réutilise s'il existe.
+		// Routage : on injecte le username dans l'URL de redirection pour qu'au
+		// /auth-callback on sache quel username "activer" (claim côté BDD).
+		const redirectTo = appendUsername(body.redirect_to ?? '', username);
+
 		const { error: otpError } = await admin.auth.signInWithOtp({
-			email: authEmail,
-			options: body.redirect_to ? { emailRedirectTo: body.redirect_to } : undefined
+			email: realEmail,
+			options: redirectTo ? { emailRedirectTo: redirectTo } : undefined
 		});
 		if (otpError) {
 			console.error('signInWithOtp failed', otpError);
-			return jsonResponse({ error: 'Envoi du lien magique échoué.' }, 500);
+			return jsonResponse({ error: otpError.message ?? 'Envoi du lien magique échoué.' }, 500);
 		}
 
 		return jsonResponse({
@@ -122,18 +123,13 @@ serve(async (req) => {
 });
 
 /**
- * Synthétise un email "auth" sub-adressé pour permettre plusieurs comptes
- * dans la même boîte mail. Si le local-part contient déjà un `+xxx`, on le
- * remplace pour rester déterministe.
- *
- * Exemple : ('parent+abc@gmail.com', 'lea') → 'parent+gramgame-lea@gmail.com'
+ * Ajoute `?username=<X>` (ou `&username=<X>`) à l'URL de redirection donnée.
+ * Si l'URL est vide, retourne une chaîne vide (Supabase utilisera son défaut).
  */
-function synthesizeAuthEmail(realEmail: string, username: string): string {
-	const at = realEmail.lastIndexOf('@');
-	const local = realEmail.slice(0, at);
-	const domain = realEmail.slice(at + 1);
-	const baseLocal = local.split('+')[0];
-	return `${baseLocal}+gramgame-${username}@${domain}`;
+function appendUsername(redirectTo: string, username: string): string {
+	if (!redirectTo) return '';
+	const sep = redirectTo.includes('?') ? '&' : '?';
+	return `${redirectTo}${sep}username=${encodeURIComponent(username)}`;
 }
 
 function maskEmail(email: string): string {

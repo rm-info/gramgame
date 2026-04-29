@@ -2,10 +2,11 @@
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import { auth } from '$lib/auth.svelte';
+	import { activeUsername } from '$lib/active-username.svelte';
 	import { profileState } from '$lib/profile.svelte';
 
 	let { children } = $props();
@@ -26,11 +27,34 @@
 			return;
 		}
 
-		if (auth.user && !profileState.loaded) {
-			profileState.load();
+		if (auth.user && !activeUsername.loaded) {
+			activeUsername.load().then(() => {
+				if (activeUsername.username) profileState.load();
+			});
+			return;
 		}
 
-		if (auth.user && profileState.loaded && !profileState.profile && path !== '/onboarding') {
+		if (
+			auth.user &&
+			activeUsername.loaded &&
+			activeUsername.username &&
+			profileState.loadedFor !== activeUsername.username
+		) {
+			profileState.load();
+			return;
+		}
+
+		// Si l'utilisateur a une session mais aucun username (cas dégradé) ou
+		// pas de profil pour le username actif, direction onboarding.
+		if (
+			auth.user &&
+			activeUsername.loaded &&
+			activeUsername.username &&
+			profileState.loaded &&
+			profileState.loadedFor === activeUsername.username &&
+			!profileState.gradeLevel &&
+			path !== '/onboarding'
+		) {
 			goto(`${base}/onboarding`, { replaceState: true });
 		}
 	});
@@ -38,7 +62,17 @@
 	async function handleSignOut() {
 		await auth.signOut();
 		profileState.reset();
+		activeUsername.reset();
 		goto(`${base}/login`, { replaceState: true });
+	}
+
+	async function switchUsername(name: string) {
+		if (name === activeUsername.username) return;
+		activeUsername.set(name);
+		profileState.reset();
+		await profileState.load();
+		await invalidateAll();
+		goto(`${base}/`, { replaceState: true });
 	}
 </script>
 
@@ -50,9 +84,23 @@
 <header class="topbar">
 	<div class="container topbar-inner">
 		<a href={`${base}/`} class="brand">Gramgame</a>
-		{#if auth.user && profileState.username}
+		{#if auth.user && activeUsername.username}
 			<nav class="nav">
-				<span class="muted">Bonjour {profileState.username}</span>
+				{#if activeUsername.available.length > 1}
+					<label class="switcher">
+						<span class="muted">Compte :</span>
+						<select
+							value={activeUsername.username}
+							onchange={(e) => switchUsername((e.currentTarget as HTMLSelectElement).value)}
+						>
+							{#each activeUsername.available as u (u)}
+								<option value={u}>{u}</option>
+							{/each}
+						</select>
+					</label>
+				{:else}
+					<span class="muted">Bonjour {activeUsername.username}</span>
+				{/if}
 				<button type="button" class="secondary" onclick={handleSignOut}>Déconnexion</button>
 			</nav>
 		{/if}
@@ -90,5 +138,16 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-4);
+	}
+	.switcher {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.switcher select {
+		padding: 4px 8px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		background: var(--color-surface);
 	}
 </style>
