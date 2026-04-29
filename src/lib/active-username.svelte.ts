@@ -64,50 +64,34 @@ class ActiveUsernameState {
 	}
 
 	/**
-	 * Tente de "claim" un username : pose user_id sur sa ligne usernames si
-	 * elle est non claim et que l'email JWT correspond. RLS impose les checks.
-	 * Idempotent : si déjà claim par l'utilisateur courant, ne fait rien.
+	 * Tente de "claim" un username via une fonction Postgres SECURITY DEFINER
+	 * (côté serveur, à l'abri des subtilités RLS). Idempotent : si déjà claim
+	 * par l'utilisateur courant, retourne ok.
 	 */
 	async claim(name: string): Promise<{ ok: boolean; reason?: string }> {
 		if (!auth.user) return { ok: false, reason: 'Pas de session.' };
 
-		// 1. UPDATE — RLS autorise seulement si user_id IS NULL et JWT email = real_email.
-		const { data: updated, error: updateError } = await supabase
-			.from('usernames')
-			.update({ user_id: auth.user.id })
-			.eq('username', name)
-			.is('user_id', null)
-			.select();
+		const { data, error } = await supabase.rpc('claim_username', {
+			target_username: name
+		});
 
-		if (updateError) {
-			console.error('Claim UPDATE failed', updateError);
-			return { ok: false, reason: updateError.message };
+		if (error) {
+			console.error('claim_username rpc failed', error);
+			return { ok: false, reason: error.message };
 		}
 
-		if (updated && updated.length > 0) {
-			return { ok: true };
-		}
+		if (data === 'ok') return { ok: true };
 
-		// 2. UPDATE n'a rien mis à jour. On essaie de voir l'état actuel via SELECT.
-		// RLS sur SELECT autorise seulement si auth.uid() = user_id (déjà claim par nous).
-		const { data: existing } = await supabase
-			.from('usernames')
-			.select('user_id')
-			.eq('username', name)
-			.maybeSingle();
-
-		if (existing && existing.user_id === auth.user.id) {
-			// Déjà claim par nous-mêmes, OK.
-			return { ok: true };
-		}
-
-		// 3. Ni update ni read : soit la ligne n'existe pas, soit elle est claim
-		// par quelqu'un d'autre, soit (le plus probable) l'email JWT ne match pas
-		// real_email — auquel cas la ligne existe mais nous est invisible. Le
-		// message expose l'email de la session pour aider à debug.
+		const reasons: Record<string, string> = {
+			not_authenticated: 'Pas de session active.',
+			no_email: 'Aucun email associé à ta session.',
+			not_found: `Le compte « ${name} » n'existe pas.`,
+			taken_by_other: `Le compte « ${name} » appartient à un autre utilisateur.`,
+			email_mismatch: `L'email de ta session (${auth.user.email ?? '?'}) ne correspond pas à l'email d'inscription du compte « ${name} ». Reconnecte-toi avec le bon email, ou refais une inscription.`
+		};
 		return {
 			ok: false,
-			reason: `impossible de revendiquer ce compte. Email de session : « ${auth.user.email ?? '?'} ». Si l'inscription a été faite avec un email différent, fais une nouvelle inscription propre.`
+			reason: reasons[data as string] ?? `Erreur inattendue : ${data}`
 		};
 	}
 
