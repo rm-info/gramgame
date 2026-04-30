@@ -163,6 +163,14 @@
 	<h1>Nouvel exercice</h1>
 	<p class="muted">Choisis une règle, un thème, ton niveau et le nombre de trous.</p>
 
+	<aside class="disclaimer">
+		<strong>⚠️ L'IA peut se tromper.</strong> Le texte généré, les bonnes réponses et le placement
+		des trous peuvent contenir des erreurs (incohérence grammaticale, règle mal appliquée). Avant
+		d'utiliser un exercice comme support pédagogique, fais-le relire par un professeur ou une
+		personne avertie. Les comptes <strong>professeur</strong> et <strong>administrateur</strong>
+		peuvent éditer chaque exercice pour corriger les défauts.
+	</aside>
+
 	{#if rulesLoading}
 		<p class="muted">Chargement des règles…</p>
 	{:else if rulesError}
@@ -277,6 +285,14 @@
 </section>
 
 <style>
+	.disclaimer {
+		background: rgba(201, 122, 29, 0.08);
+		border-left: 3px solid var(--color-warning);
+		padding: var(--space-3) var(--space-4);
+		border-radius: var(--radius-sm);
+		font-size: 0.95em;
+		line-height: 1.5;
+	}
 	.past-list {
 		list-style: none;
 		padding: 0;

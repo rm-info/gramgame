@@ -31,6 +31,14 @@
 					<strong>administrateur</strong>.
 				</p>
 			</a>
+
+			<a href={`${base}/admin/rules`} class="card-link">
+				<h2>Règles de grammaire</h2>
+				<p class="muted">
+					Catalogue des règles disponibles à la pratique. Ajouter, dupliquer, éditer (candidats,
+					exemples), supprimer.
+				</p>
+			</a>
 		{/if}
 	</div>
 </section>
