@@ -158,93 +158,98 @@
 			{/if}
 		</header>
 
-		<div class="card stack">
-			<div>
+		<div class="editor-grid">
+			<div class="card stack editor-pane editor-pane-text">
 				<label for="text">
 					Texte (les marqueurs <code>{'{{1}}'}</code>, <code>{'{{2}}'}</code>, … indiquent les
 					trous) :
 				</label>
-				<textarea id="text" rows="14" bind:value={editText}></textarea>
+				<textarea id="text" bind:value={editText}></textarea>
+
+				<div class="stats">
+					<span
+						>Marqueurs détectés dans le texte :
+						<strong>{validation.markerCount}</strong></span
+					>
+					<span>Trous définis : <strong>{validation.blankCount}</strong></span>
+				</div>
+
+				{#if validation.markersWithoutBlank.length > 0}
+					<p class="warning">
+						Marqueurs présents dans le texte sans trou défini :
+						{validation.markersWithoutBlank.map((p) => `{{${p}}}`).join(', ')}
+					</p>
+				{/if}
+				{#if validation.blanksWithoutMarker.length > 0}
+					<p class="warning">
+						Trous définis sans marqueur dans le texte :
+						{validation.blanksWithoutMarker.map((p) => `{{${p}}}`).join(', ')}
+					</p>
+				{/if}
 			</div>
 
-			<div class="stats">
-				<span>Marqueurs détectés dans le texte : <strong>{validation.markerCount}</strong></span>
-				<span>Trous définis : <strong>{validation.blankCount}</strong></span>
+			<div class="card stack editor-pane editor-pane-blanks">
+				<div class="row-between">
+					<h2>Trous</h2>
+					<button type="button" class="secondary" onclick={addBlank}>+ Ajouter un trou</button>
+				</div>
+
+				<div class="blanks-scroll">
+					{#if editBlanks.length === 0}
+						<p class="muted">Aucun trou. Ajoute-en avec le bouton ci-dessus.</p>
+					{:else}
+						<table class="blanks-table">
+							<thead>
+								<tr>
+									<th>Position</th>
+									<th>Bonne réponse</th>
+									<th>Distracteur</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each editBlanks as b (b.position)}
+									<tr>
+										<td><code>{`{{${b.position}}}`}</code></td>
+										<td>
+											<select bind:value={b.correct}>
+												{#each rule.candidates as c (c)}
+													<option value={c}>{c}</option>
+												{/each}
+											</select>
+										</td>
+										<td>
+											<select bind:value={b.distractor}>
+												{#each rule.candidates as c (c)}
+													<option value={c}>{c}</option>
+												{/each}
+											</select>
+										</td>
+										<td class="actions">
+											<button
+												type="button"
+												class="link"
+												title="Inverser bonne réponse / distracteur"
+												onclick={() => swapCorrectDistractor(b.position)}
+											>
+												⇄
+											</button>
+											<button
+												type="button"
+												class="link danger"
+												title="Supprimer ce trou"
+												onclick={() => removeBlank(b.position)}
+											>
+												✕
+											</button>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{/if}
+				</div>
 			</div>
-
-			{#if validation.markersWithoutBlank.length > 0}
-				<p class="warning">
-					Marqueurs présents dans le texte sans trou défini :
-					{validation.markersWithoutBlank.map((p) => `{{${p}}}`).join(', ')}
-				</p>
-			{/if}
-			{#if validation.blanksWithoutMarker.length > 0}
-				<p class="warning">
-					Trous définis sans marqueur dans le texte :
-					{validation.blanksWithoutMarker.map((p) => `{{${p}}}`).join(', ')}
-				</p>
-			{/if}
-		</div>
-
-		<div class="card stack">
-			<div class="row-between">
-				<h2>Trous</h2>
-				<button type="button" class="secondary" onclick={addBlank}>+ Ajouter un trou</button>
-			</div>
-
-			{#if editBlanks.length === 0}
-				<p class="muted">Aucun trou. Ajoute-en avec le bouton ci-dessus.</p>
-			{:else}
-				<table class="blanks-table">
-					<thead>
-						<tr>
-							<th>Position</th>
-							<th>Bonne réponse</th>
-							<th>Distracteur</th>
-							<th></th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each editBlanks as b (b.position)}
-							<tr>
-								<td><code>{`{{${b.position}}}`}</code></td>
-								<td>
-									<select bind:value={b.correct}>
-										{#each rule.candidates as c (c)}
-											<option value={c}>{c}</option>
-										{/each}
-									</select>
-								</td>
-								<td>
-									<select bind:value={b.distractor}>
-										{#each rule.candidates as c (c)}
-											<option value={c}>{c}</option>
-										{/each}
-									</select>
-								</td>
-								<td class="actions">
-									<button
-										type="button"
-										class="link"
-										title="Inverser bonne réponse / distracteur"
-										onclick={() => swapCorrectDistractor(b.position)}
-									>
-										⇄
-									</button>
-									<button
-										type="button"
-										class="link danger"
-										title="Supprimer ce trou"
-										onclick={() => removeBlank(b.position)}
-									>
-										✕
-									</button>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
 		</div>
 
 		<div class="actions">
@@ -274,6 +279,7 @@
 	}
 	textarea {
 		width: 100%;
+		min-height: 220px;
 		font-family: var(--font-serif);
 		font-size: 1rem;
 		line-height: 1.6;
@@ -282,6 +288,43 @@
 		border-radius: var(--radius-sm);
 		background: var(--color-surface);
 		resize: vertical;
+	}
+	.editor-grid {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: var(--space-4);
+	}
+	@media (min-width: 900px) {
+		.editor-grid {
+			grid-template-columns: 1fr 1fr;
+			align-items: stretch;
+		}
+		.editor-pane {
+			height: calc(100vh - 280px);
+			min-height: 450px;
+			max-height: 800px;
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		}
+		/* Le textarea prend toute la hauteur restante du panneau gauche */
+		.editor-pane-text textarea {
+			flex: 1;
+			min-height: 0;
+			resize: none;
+		}
+		/* La zone scrollable des trous prend toute la hauteur restante du panneau droit */
+		.editor-pane-blanks .blanks-scroll {
+			flex: 1;
+			min-height: 0;
+			overflow-y: auto;
+			margin: 0 calc(-1 * var(--space-6));
+			padding: 0 var(--space-6);
+		}
+	}
+	.blanks-scroll {
+		/* Sur mobile : pas de hauteur contrainte, scroll naturel de la page */
+		overflow-y: auto;
 	}
 	.stats {
 		display: flex;
