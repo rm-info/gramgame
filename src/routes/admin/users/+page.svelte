@@ -38,6 +38,20 @@
 	});
 
 	async function changeRole(username: string, newRole: Role) {
+		// Garde-fou client : confirmation explicite quand on touche à son propre rôle
+		// (la garde de DB via trigger empêchera quand même la démotion du dernier
+		// admin, mais autant éviter l'aller-retour réseau).
+		if (username === activeUsername.username && newRole !== activeUsername.role) {
+			const ok = confirm(
+				`Tu es sur le point de changer TON propre rôle (${activeUsername.role} → ${newRole}). Continuer ?`
+			);
+			if (!ok) {
+				// Reverte le select à sa valeur d'origine
+				users = users.map((u) => (u.username === username ? { ...u } : u));
+				return;
+			}
+		}
+
 		updating[username] = true;
 		updateMsg = null;
 		const { error } = await supabase
@@ -46,7 +60,15 @@
 			.eq('username', username);
 		updating[username] = false;
 		if (error) {
+			// Le trigger DB renvoie un message friendly si on tente de démettre le
+			// dernier admin. On le surface directement.
 			updateMsg = `Échec : ${error.message}`;
+			// Recharge la liste pour resynchroniser après échec
+			const { data } = await supabase
+				.from('usernames')
+				.select('username, real_email, role, created_at, user_id')
+				.order('created_at', { ascending: true });
+			if (data) users = data as UserRow[];
 			return;
 		}
 		const u = users.find((x) => x.username === username);
