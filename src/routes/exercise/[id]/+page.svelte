@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { base } from '$app/paths';
 	import { supabase } from '$lib/supabase';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import ExerciseText from '$lib/components/ExerciseText.svelte';
@@ -154,7 +155,12 @@
 			</details>
 		{:else}
 			<header class="stack">
-				<h1>{rule.display_name}</h1>
+				<div class="header-row">
+					<h1>{rule.display_name}</h1>
+					{#if activeUsername.canEditExercises}
+						<a href={`${base}/exercise/${exercise.id}/edit`} class="edit-link">Modifier</a>
+					{/if}
+				</div>
 				<p class="muted">
 					Thème : <em>{exercise.theme}</em> · Niveau : {exercise.grade_level} ·
 					{view.blanks.length} trous
@@ -194,5 +200,26 @@
 		align-items: center;
 		gap: var(--space-4);
 		flex-wrap: wrap;
+	}
+	.header-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-4);
+	}
+	.header-row h1 {
+		margin: 0;
+	}
+	.edit-link {
+		font-size: 0.9em;
+		padding: 4px 10px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		color: var(--color-primary);
+	}
+	.edit-link:hover {
+		background: var(--color-primary);
+		color: white;
+		text-decoration: none;
 	}
 </style>

@@ -3,17 +3,30 @@ import { supabase } from './supabase';
 
 const STORAGE_KEY = 'gramgame.active_username';
 
+export type Role = 'user' | 'prof' | 'admin';
+
+interface UsernameRow {
+	username: string;
+	role: Role;
+}
+
 /**
  * Username "actif" pour la session courante (parmi ceux que l'utilisateur
  * possède). Persisté en localStorage pour rester d'une session navigateur à
- * l'autre. Une page de "switch d'apprenant" plus tard permettra à un parent
- * de basculer d'un enfant à l'autre sans relogin.
+ * l'autre.
  */
 class ActiveUsernameState {
 	username: string | null = $state(null);
-	available: string[] = $state([]);
+	available: UsernameRow[] = $state([]);
 	loaded = $state(false);
 	loading = $state(false);
+
+	availableNames = $derived(this.available.map((u) => u.username));
+	role: Role = $derived(
+		(this.available.find((u) => u.username === this.username)?.role ?? 'user') as Role
+	);
+	isAdmin = $derived(this.role === 'admin');
+	canEditExercises = $derived(this.role === 'prof' || this.role === 'admin');
 
 	async load() {
 		if (typeof window === 'undefined') return;
@@ -28,7 +41,7 @@ class ActiveUsernameState {
 		this.loading = true;
 		const { data, error } = await supabase
 			.from('usernames')
-			.select('username')
+			.select('username, role')
 			.eq('user_id', auth.user.id);
 		this.loading = false;
 		this.loaded = true;
@@ -39,13 +52,14 @@ class ActiveUsernameState {
 			return;
 		}
 
-		this.available = (data ?? []).map((r) => r.username);
+		this.available = (data ?? []) as UsernameRow[];
 
 		const stored = localStorage.getItem(STORAGE_KEY);
-		if (stored && this.available.includes(stored)) {
+		const names = this.availableNames;
+		if (stored && names.includes(stored)) {
 			this.username = stored;
-		} else if (this.available.length > 0) {
-			this.username = this.available[0];
+		} else if (names.length > 0) {
+			this.username = names[0];
 			localStorage.setItem(STORAGE_KEY, this.username);
 		} else {
 			this.username = null;
@@ -54,7 +68,7 @@ class ActiveUsernameState {
 	}
 
 	set(name: string) {
-		if (!this.available.includes(name)) {
+		if (!this.availableNames.includes(name)) {
 			throw new Error(`Username "${name}" non disponible.`);
 		}
 		this.username = name;

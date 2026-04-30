@@ -86,20 +86,23 @@
 		<a href={`${base}/`} class="brand">Gramgame</a>
 		{#if auth.user && activeUsername.username}
 			<nav class="nav">
-				{#if activeUsername.available.length > 1}
+				{#if activeUsername.availableNames.length > 1}
 					<label class="switcher">
 						<span class="muted">Compte :</span>
 						<select
 							value={activeUsername.username}
 							onchange={(e) => switchUsername((e.currentTarget as HTMLSelectElement).value)}
 						>
-							{#each activeUsername.available as u (u)}
+							{#each activeUsername.availableNames as u (u)}
 								<option value={u}>{u}</option>
 							{/each}
 						</select>
 					</label>
 				{:else}
 					<span class="muted">Bonjour {activeUsername.username}</span>
+				{/if}
+				{#if activeUsername.isAdmin}
+					<a href={`${base}/admin`} class="admin-link">Admin</a>
 				{/if}
 				<button type="button" class="secondary" onclick={handleSignOut}>Déconnexion</button>
 			</nav>
@@ -149,5 +152,17 @@
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
 		background: var(--color-surface);
+	}
+	.admin-link {
+		font-size: 0.9em;
+		padding: 4px 10px;
+		border: 1px solid var(--color-primary);
+		border-radius: var(--radius-sm);
+		color: var(--color-primary);
+	}
+	.admin-link:hover {
+		background: var(--color-primary);
+		color: white;
+		text-decoration: none;
 	}
 </style>

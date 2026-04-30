@@ -37,7 +37,7 @@
 
 		await activeUsername.load();
 
-		if (requestedUsername && activeUsername.available.includes(requestedUsername)) {
+		if (requestedUsername && activeUsername.availableNames.includes(requestedUsername)) {
 			activeUsername.set(requestedUsername);
 		}
 
