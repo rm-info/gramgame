@@ -99,7 +99,7 @@
 						</select>
 					</label>
 				{:else}
-					<span class="muted">Bonjour {activeUsername.username}</span>
+					<a href={`${base}/profile`} class="profile-link">{activeUsername.username}</a>
 				{/if}
 				{#if activeUsername.canEditExercises}
 					<a href={`${base}/admin`} class="admin-link">Gestion</a>
@@ -163,6 +163,16 @@
 	.admin-link:hover {
 		background: var(--color-primary);
 		color: white;
+		text-decoration: none;
+	}
+	.profile-link {
+		font-size: 0.95em;
+		color: var(--color-text);
+		padding: 4px 8px;
+		border-radius: var(--radius-sm);
+	}
+	.profile-link:hover {
+		background: rgba(47, 93, 177, 0.08);
 		text-decoration: none;
 	}
 </style>
