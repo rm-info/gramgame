@@ -12,6 +12,9 @@
 		created_at: string;
 		created_by_username: string;
 		llm_model: string;
+		verified: boolean;
+		verified_at: string | null;
+		verified_by_username: string | null;
 		rule: { display_name: string } | null;
 	}
 
@@ -28,7 +31,7 @@
 		supabase
 			.from('exercises')
 			.select(
-				'id, rule_id, theme, grade_level, num_blanks, created_at, created_by_username, llm_model, rule:rules ( display_name )'
+				'id, rule_id, theme, grade_level, num_blanks, created_at, created_by_username, llm_model, verified, verified_at, verified_by_username, rule:rules ( display_name )'
 			)
 			.order('created_at', { ascending: false })
 			.limit(200)
@@ -99,6 +102,7 @@
 			<table class="ex-table">
 				<thead>
 					<tr>
+						<th>Vérifié</th>
 						<th>Règle</th>
 						<th>Thème</th>
 						<th>Niveau</th>
@@ -112,6 +116,20 @@
 				<tbody>
 					{#each filtered as ex (ex.id)}
 						<tr>
+							<td>
+								{#if ex.verified}
+									<span
+										class="verified-pill"
+										title={ex.verified_at
+											? `Vérifié${ex.verified_by_username ? ` par ${ex.verified_by_username}` : ''} le ${new Date(ex.verified_at).toLocaleDateString('fr-FR')}`
+											: 'Vérifié'}
+									>
+										✓
+									</span>
+								{:else}
+									<span class="muted small">—</span>
+								{/if}
+							</td>
 							<td><strong>{ex.rule?.display_name ?? ex.rule_id}</strong></td>
 							<td>{ex.theme}</td>
 							<td class="muted">{ex.grade_level}</td>
@@ -190,5 +208,13 @@
 		background: var(--color-primary);
 		color: white;
 		text-decoration: none;
+	}
+	.verified-pill {
+		display: inline-block;
+		padding: 2px 8px;
+		background: rgba(46, 139, 87, 0.18);
+		color: var(--color-success);
+		border-radius: 999px;
+		font-weight: 600;
 	}
 </style>

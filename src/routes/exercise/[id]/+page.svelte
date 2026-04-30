@@ -23,6 +23,9 @@
 		num_blanks: number;
 		text: string;
 		blanks: BlankRow[];
+		verified: boolean;
+		verified_at: string | null;
+		verified_by_username: string | null;
 	}
 
 	interface RuleData {
@@ -156,7 +159,19 @@
 		{:else}
 			<header class="stack">
 				<div class="header-row">
-					<h1>{rule.display_name}</h1>
+					<div class="title-block">
+						<h1>{rule.display_name}</h1>
+						{#if exercise.verified}
+							<span
+								class="verified-badge"
+								title={exercise.verified_at
+									? `Vérifié${exercise.verified_by_username ? ` par ${exercise.verified_by_username}` : ''} le ${new Date(exercise.verified_at).toLocaleDateString('fr-FR')}`
+									: 'Vérifié'}
+							>
+								✓ Vérifié
+							</span>
+						{/if}
+					</div>
 					{#if activeUsername.canEditExercises}
 						<a href={`${base}/exercise/${exercise.id}/edit`} class="edit-link">Modifier</a>
 					{/if}
@@ -215,8 +230,23 @@
 		justify-content: space-between;
 		gap: var(--space-4);
 	}
-	.header-row h1 {
+	.title-block {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		flex-wrap: wrap;
+	}
+	.title-block h1 {
 		margin: 0;
+	}
+	.verified-badge {
+		display: inline-block;
+		padding: 4px 10px;
+		background: rgba(46, 139, 87, 0.15);
+		color: var(--color-success);
+		border-radius: 999px;
+		font-size: 0.85em;
+		font-weight: 600;
 	}
 	.edit-link {
 		font-size: 0.9em;

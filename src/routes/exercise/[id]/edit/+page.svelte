@@ -20,6 +20,9 @@
 		num_blanks: number;
 		text: string;
 		blanks: BlankRow[];
+		verified: boolean;
+		verified_at: string | null;
+		verified_by_username: string | null;
 	}
 
 	interface RuleData {
@@ -37,6 +40,7 @@
 
 	let editText = $state('');
 	let editBlanks = $state<BlankRow[]>([]);
+	let editVerified = $state(false);
 	let saving = $state(false);
 	let saveMsg = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
@@ -75,6 +79,7 @@
 		editBlanks = exercise.blanks
 			.map((b) => ({ ...b }))
 			.sort((a, b) => a.position - b.position);
+		editVerified = exercise.verified;
 
 		const { data: r, error: rError } = await supabase
 			.from('rules')
@@ -120,18 +125,45 @@
 		saving = true;
 		saveError = null;
 		saveMsg = null;
+
+		// Si l'état "vérifié" a basculé, on met à jour les méta de vérification.
+		// Sinon on les laisse intactes (ne pas écraser un précédent verified_at
+		// quand on fait juste une correction de typo sans toucher au flag).
+		const verifiedChanged = editVerified !== exercise.verified;
+		const verificationFields = verifiedChanged
+			? editVerified
+				? {
+						verified: true,
+						verified_at: new Date().toISOString(),
+						verified_by_username: activeUsername.username
+					}
+				: {
+						verified: false,
+						verified_at: null,
+						verified_by_username: null
+					}
+			: {};
+
 		const { error } = await supabase
 			.from('exercises')
 			.update({
 				text: editText,
 				blanks: editBlanks,
-				num_blanks: editBlanks.length
+				num_blanks: editBlanks.length,
+				...verificationFields
 			})
 			.eq('id', exercise.id);
 		saving = false;
 		if (error) {
 			saveError = error.message;
 			return;
+		}
+		// Synchronise l'état local pour que les prochains saves comparent
+		// correctement.
+		if (verifiedChanged) {
+			exercise.verified = editVerified;
+			exercise.verified_at = editVerified ? new Date().toISOString() : null;
+			exercise.verified_by_username = editVerified ? (activeUsername.username ?? null) : null;
 		}
 		saveMsg = 'Modifications enregistrées.';
 	}
@@ -250,6 +282,26 @@
 					{/if}
 				</div>
 			</div>
+		</div>
+
+		<div class="card stack">
+			<label class="verify-row">
+				<input type="checkbox" bind:checked={editVerified} />
+				<span>
+					<strong>Marquer cet exercice comme vérifié.</strong>
+					{#if exercise.verified && exercise.verified_at}
+						<span class="muted small">
+							(actuellement vérifié{#if exercise.verified_by_username}
+								par <strong>{exercise.verified_by_username}</strong>{/if}
+							le {new Date(exercise.verified_at).toLocaleDateString('fr-FR')})
+						</span>
+					{/if}
+				</span>
+			</label>
+			<p class="muted small">
+				Le badge « Vérifié » apparaîtra à côté du titre quand un utilisateur ouvrira cet exercice.
+				À cocher uniquement si le texte et les bonnes réponses sont conformes après relecture.
+			</p>
 		</div>
 
 		<div class="actions">
@@ -398,5 +450,16 @@
 	}
 	.actions .error {
 		color: var(--color-error);
+	}
+	.verify-row {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-2);
+	}
+	.verify-row input[type='checkbox'] {
+		margin-top: 4px;
+	}
+	.small {
+		font-size: 0.9em;
 	}
 </style>

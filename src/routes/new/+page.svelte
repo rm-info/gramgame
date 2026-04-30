@@ -22,6 +22,7 @@
 		grade_level: string;
 		num_blanks: number;
 		created_at: string;
+		verified: boolean;
 		rule: { display_name: string } | null;
 	}
 
@@ -96,7 +97,7 @@
 		supabase
 			.from('exercises')
 			.select(
-				'id, rule_id, theme, grade_level, num_blanks, created_at, rule:rules ( display_name )'
+				'id, rule_id, theme, grade_level, num_blanks, created_at, verified, rule:rules ( display_name )'
 			)
 			.eq('created_by_username', username)
 			.order('created_at', { ascending: false })
@@ -258,6 +259,11 @@
 							<div class="past-title">
 								<strong>{ex.rule?.display_name ?? ex.rule_id}</strong>
 								<span class="muted">· {ex.theme}</span>
+								{#if ex.verified}
+									<span class="verified-pill" title="Vérifié par un professeur ou administrateur">
+										✓ vérifié
+									</span>
+								{/if}
 							</div>
 							<div class="muted past-sub">
 								{ex.num_blanks} trous · {ex.grade_level} · {formatDate(ex.created_at)}
@@ -311,6 +317,16 @@
 	}
 	.past-title strong {
 		font-weight: 600;
+	}
+	.verified-pill {
+		display: inline-block;
+		margin-left: var(--space-2);
+		padding: 2px 8px;
+		background: rgba(46, 139, 87, 0.15);
+		color: var(--color-success);
+		border-radius: 999px;
+		font-size: 0.8em;
+		font-weight: 500;
 	}
 	.past-sub {
 		font-size: 0.9em;
