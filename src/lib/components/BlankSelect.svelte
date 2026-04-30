@@ -27,8 +27,7 @@
 			<span class="correct-hint">→ {correct}</span>
 		{/if}
 	{:else}
-		<label class="visually-hidden" for={selectId}>Trou n°{position}</label>
-		<select id={selectId} bind:value>
+		<select id={selectId} bind:value aria-label={`Trou numéro ${position}`}>
 			<option value={null}>—</option>
 			{#each options as opt (opt)}
 				<option value={opt}>{opt}</option>
@@ -92,15 +91,5 @@
 		margin-left: 4px;
 		color: var(--color-success);
 		font-weight: 600;
-	}
-	.visually-hidden {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
 	}
 </style>
