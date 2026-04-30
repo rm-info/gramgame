@@ -8,13 +8,13 @@
 
 	$effect(() => {
 		if (auth.loading || !activeUsername.loaded) return;
-		if (!auth.user || !activeUsername.isAdmin) {
+		if (!auth.user || !activeUsername.canEditExercises) {
 			goto(`${base}/`, { replaceState: true });
 		}
 	});
 </script>
 
-{#if activeUsername.isAdmin}
+{#if activeUsername.canEditExercises}
 	{@render children()}
 {:else if !activeUsername.loaded}
 	<div class="container muted">Chargement…</div>

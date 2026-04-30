@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { supabase } from '$lib/supabase';
 	import { activeUsername, type Role } from '$lib/active-username.svelte';
@@ -19,6 +20,15 @@
 
 	const ROLES: Role[] = ['user', 'prof', 'admin'];
 
+	// Garde admin-only : la /admin/+layout autorise prof+admin pour le dashboard,
+	// mais cette page-ci est strictement admin.
+	$effect(() => {
+		if (!activeUsername.loaded) return;
+		if (!activeUsername.isAdmin) {
+			goto(`${base}/admin`, { replaceState: true });
+		}
+	});
+
 	$effect(() => {
 		if (!activeUsername.isAdmin) return;
 		loading = true;
@@ -38,18 +48,16 @@
 	});
 
 	async function changeRole(username: string, newRole: Role) {
-		// Garde-fou client : confirmation explicite quand on touche à son propre rôle
-		// (la garde de DB via trigger empêchera quand même la démotion du dernier
-		// admin, mais autant éviter l'aller-retour réseau).
-		if (username === activeUsername.username && newRole !== activeUsername.role) {
-			const ok = confirm(
-				`Tu es sur le point de changer TON propre rôle (${activeUsername.role} → ${newRole}). Continuer ?`
-			);
-			if (!ok) {
-				// Reverte le select à sa valeur d'origine
-				users = users.map((u) => (u.username === username ? { ...u } : u));
-				return;
-			}
+		// Sanity check côté UI : pas de modification de son propre rôle
+		// (le trigger 0009 empêche aussi côté DB).
+		if (username === activeUsername.username) {
+			updateMsg = 'Tu ne peux pas modifier ton propre rôle.';
+			const { data } = await supabase
+				.from('usernames')
+				.select('username, real_email, role, created_at, user_id')
+				.order('created_at', { ascending: true });
+			if (data) users = data as UserRow[];
+			return;
 		}
 
 		updating[username] = true;
@@ -60,10 +68,7 @@
 			.eq('username', username);
 		updating[username] = false;
 		if (error) {
-			// Le trigger DB renvoie un message friendly si on tente de démettre le
-			// dernier admin. On le surface directement.
 			updateMsg = `Échec : ${error.message}`;
-			// Recharge la liste pour resynchroniser après échec
 			const { data } = await supabase
 				.from('usernames')
 				.select('username, real_email, role, created_at, user_id')
@@ -74,12 +79,6 @@
 		const u = users.find((x) => x.username === username);
 		if (u) u.role = newRole;
 		updateMsg = `Rôle de ${username} mis à jour : ${newRole}.`;
-
-		// Si on vient de modifier son propre rôle, recharger l'état pour ne pas
-		// avoir d'info périmée dans la nav (exemple : auto-démotion d'admin).
-		if (username === activeUsername.username) {
-			await activeUsername.load();
-		}
 	}
 
 	function formatDate(iso: string) {
@@ -93,12 +92,11 @@
 
 <section class="container stack">
 	<header class="stack">
-		<a href={`${base}/admin`} class="back">← Retour à l'admin</a>
+		<a href={`${base}/admin`} class="back">← Retour à la gestion</a>
 		<h1>Utilisateurs</h1>
 		<p class="muted">
-			Modifie le rôle d'un utilisateur. Un <strong>professeur</strong> peut éditer le texte des
-			exercices générés. Un <strong>administrateur</strong> peut faire la même chose, plus gérer
-			les rôles.
+			Modifie le rôle d'un utilisateur. <strong>Tu ne peux pas modifier le tien</strong> — un
+			autre administrateur doit le faire.
 		</p>
 	</header>
 
@@ -122,20 +120,28 @@
 				</thead>
 				<tbody>
 					{#each users as u (u.username)}
-						<tr class:current={u.username === activeUsername.username}>
-							<td><strong>{u.username}</strong></td>
+						{@const isSelf = u.username === activeUsername.username}
+						<tr class:current={isSelf}>
+							<td>
+								<strong>{u.username}</strong>
+								{#if isSelf}<span class="muted self-tag">(toi)</span>{/if}
+							</td>
 							<td class="muted">{u.real_email}</td>
 							<td>
-								<select
-									value={u.role}
-									disabled={!!updating[u.username]}
-									onchange={(e) =>
-										changeRole(u.username, (e.currentTarget as HTMLSelectElement).value as Role)}
-								>
-									{#each ROLES as r (r)}
-										<option value={r}>{r}</option>
-									{/each}
-								</select>
+								{#if isSelf}
+									<span class="role-readonly">{u.role}</span>
+								{:else}
+									<select
+										value={u.role}
+										disabled={!!updating[u.username]}
+										onchange={(e) =>
+											changeRole(u.username, (e.currentTarget as HTMLSelectElement).value as Role)}
+									>
+										{#each ROLES as r (r)}
+											<option value={r}>{r}</option>
+										{/each}
+									</select>
+								{/if}
 							</td>
 							<td class="muted">{formatDate(u.created_at)}</td>
 							<td class="muted">
@@ -187,6 +193,17 @@
 		padding: 4px 8px;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
+	}
+	.role-readonly {
+		display: inline-block;
+		padding: 4px 8px;
+		background: rgba(47, 93, 177, 0.1);
+		border-radius: var(--radius-sm);
+		color: var(--color-primary);
+	}
+	.self-tag {
+		margin-left: 4px;
+		font-size: 0.85em;
 	}
 	.ok {
 		color: var(--color-success);

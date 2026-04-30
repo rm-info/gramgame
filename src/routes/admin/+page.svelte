@@ -1,19 +1,37 @@
 <script lang="ts">
 	import { base } from '$app/paths';
+	import { activeUsername } from '$lib/active-username.svelte';
 </script>
 
 <section class="container stack">
-	<h1>Administration</h1>
-	<p class="muted">Outils de gestion réservés aux administrateurs.</p>
+	<h1>Gestion</h1>
+	<p class="muted">
+		Outils de pilotage de l'application.
+		{#if activeUsername.isAdmin}
+			Tu as les droits administrateur.
+		{:else if activeUsername.role === 'prof'}
+			Tu as les droits professeur (édition des exercices).
+		{/if}
+	</p>
 
 	<div class="grid">
-		<a href={`${base}/admin/users`} class="card-link">
-			<h2>Utilisateurs</h2>
+		<a href={`${base}/admin/exercises`} class="card-link">
+			<h2>Exercices</h2>
 			<p class="muted">
-				Lister les comptes, attribuer le rôle <strong>professeur</strong> ou
-				<strong>administrateur</strong>.
+				Lister tous les exercices générés et les éditer (corriger un texte, ajuster les bonnes
+				réponses, supprimer un trou mal placé).
 			</p>
 		</a>
+
+		{#if activeUsername.isAdmin}
+			<a href={`${base}/admin/users`} class="card-link">
+				<h2>Utilisateurs</h2>
+				<p class="muted">
+					Lister les comptes, attribuer le rôle <strong>professeur</strong> ou
+					<strong>administrateur</strong>.
+				</p>
+			</a>
+		{/if}
 	</div>
 </section>
 
@@ -32,7 +50,9 @@
 		box-shadow: var(--shadow-sm);
 		color: inherit;
 		text-decoration: none;
-		transition: border-color 120ms ease, box-shadow 120ms ease;
+		transition:
+			border-color 120ms ease,
+			box-shadow 120ms ease;
 	}
 	.card-link:hover {
 		border-color: var(--color-primary);

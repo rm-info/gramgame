@@ -101,8 +101,8 @@
 				{:else}
 					<span class="muted">Bonjour {activeUsername.username}</span>
 				{/if}
-				{#if activeUsername.isAdmin}
-					<a href={`${base}/admin`} class="admin-link">Admin</a>
+				{#if activeUsername.canEditExercises}
+					<a href={`${base}/admin`} class="admin-link">Gestion</a>
 				{/if}
 				<button type="button" class="secondary" onclick={handleSignOut}>Déconnexion</button>
 			</nav>
