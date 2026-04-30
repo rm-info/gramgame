@@ -51,43 +51,20 @@
 	];
 
 	onMount(async () => {
-		const username = activeUsername.username;
-
-		const [rulesRes, pastRes] = await Promise.all([
-			supabase
-				.from('rules')
-				.select('id, display_name, short_description, candidates')
-				.eq('rule_type', 'multiple_choice')
-				.order('id'),
-			username
-				? supabase
-						.from('exercises')
-						.select(
-							'id, rule_id, theme, grade_level, num_blanks, created_at, rule:rules ( display_name )'
-						)
-						.eq('created_by_username', username)
-						.order('created_at', { ascending: false })
-						.limit(20)
-				: Promise.resolve({ data: [], error: null })
-		]);
-
+		const { data, error } = await supabase
+			.from('rules')
+			.select('id, display_name, short_description, candidates')
+			.eq('rule_type', 'multiple_choice')
+			.order('id');
 		rulesLoading = false;
-		pastLoading = false;
-
-		if (rulesRes.error) {
-			rulesError = rulesRes.error.message;
+		if (error) {
+			rulesError = error.message;
 		} else {
-			rules = (rulesRes.data ?? []) as RuleOption[];
+			rules = (data ?? []) as RuleOption[];
 		}
 
-		if (!pastRes.error) {
-			pastExercises = (pastRes.data ?? []) as unknown as PastExercise[];
-			for (const ex of pastExercises) {
-				pastSelectedBlanks[ex.id] = ex.num_blanks;
-			}
-		}
-
-		// Pré-remplissage depuis query params (cas "exercice ciblé")
+		// Pré-remplissage depuis query params (cas "exercice ciblé").
+		// Doit se faire après le chargement des règles pour valider rule_id.
 		const params = page.url.searchParams;
 		const queryRuleId = params.get('rule_id');
 		const queryTheme = params.get('theme');
@@ -101,6 +78,40 @@
 		theme = queryTheme ?? '';
 		gradeLevel = queryGrade ?? profileState.gradeLevel ?? 'CE2';
 		numBlanks = queryNum ? Math.min(30, Math.max(3, Number(queryNum))) : 20;
+	});
+
+	// Fetch des exercices passés en réaction au username actif (qui peut arriver
+	// après le mount du composant si le layout charge encore l'auth).
+	let lastFetchedFor: string | null = null;
+	$effect(() => {
+		const username = activeUsername.username;
+		if (!username) {
+			pastExercises = [];
+			pastLoading = !activeUsername.loaded;
+			return;
+		}
+		if (lastFetchedFor === username) return;
+		lastFetchedFor = username;
+		pastLoading = true;
+		supabase
+			.from('exercises')
+			.select(
+				'id, rule_id, theme, grade_level, num_blanks, created_at, rule:rules ( display_name )'
+			)
+			.eq('created_by_username', username)
+			.order('created_at', { ascending: false })
+			.limit(20)
+			.then(({ data, error }) => {
+				pastLoading = false;
+				if (error) {
+					console.error('Failed to load past exercises', error);
+					return;
+				}
+				pastExercises = (data ?? []) as unknown as PastExercise[];
+				for (const ex of pastExercises) {
+					pastSelectedBlanks[ex.id] = ex.num_blanks;
+				}
+			});
 	});
 
 	async function handleSubmit(event: SubmitEvent) {
