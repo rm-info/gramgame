@@ -47,6 +47,27 @@
 			});
 	});
 
+	async function deleteUser(u: UserRow) {
+		const status = u.user_id ? 'activé' : 'en attente (jamais finalisé)';
+		const ok = confirm(
+			`Supprimer le compte « ${u.username} » (${u.real_email}, ${status}) ?\n\n` +
+				`Tous ses exercices et tentatives seront aussi supprimés.\n` +
+				`Cette action est irréversible.`
+		);
+		if (!ok) return;
+
+		updating[u.username] = true;
+		updateMsg = null;
+		const { error } = await supabase.from('usernames').delete().eq('username', u.username);
+		updating[u.username] = false;
+		if (error) {
+			updateMsg = `Échec : ${error.message}`;
+			return;
+		}
+		users = users.filter((x) => x.username !== u.username);
+		updateMsg = `Compte « ${u.username} » supprimé.`;
+	}
+
 	async function changeRole(username: string, newRole: Role) {
 		// Sanity check côté UI : pas de modification de son propre rôle
 		// (le trigger 0009 empêche aussi côté DB).
@@ -95,8 +116,9 @@
 		<a href={`${base}/admin`} class="back">← Retour à la gestion</a>
 		<h1>Utilisateurs</h1>
 		<p class="muted">
-			Modifie le rôle d'un utilisateur. <strong>Tu ne peux pas modifier le tien</strong> — un
-			autre administrateur doit le faire.
+			Modifie le rôle d'un utilisateur, ou supprime un compte (notamment ceux <em>en attente</em>
+			de finalisation, créés avec un email erroné). <strong>Tu ne peux pas modifier ni
+				supprimer le tien</strong> — un autre administrateur doit le faire.
 		</p>
 	</header>
 
@@ -116,6 +138,7 @@
 						<th>Rôle</th>
 						<th>Inscrit le</th>
 						<th>Statut</th>
+						<th></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -149,6 +172,19 @@
 									<span class="ok">activé</span>
 								{:else}
 									<span class="pending">en attente</span>
+								{/if}
+							</td>
+							<td class="row-actions">
+								{#if !isSelf}
+									<button
+										type="button"
+										class="link danger"
+										title="Supprimer ce compte"
+										disabled={!!updating[u.username]}
+										onclick={() => deleteUser(u)}
+									>
+										✕
+									</button>
 								{/if}
 							</td>
 						</tr>
@@ -204,6 +240,25 @@
 	.self-tag {
 		margin-left: 4px;
 		font-size: 0.85em;
+	}
+	.row-actions {
+		text-align: right;
+	}
+	button.link {
+		background: transparent;
+		color: var(--color-primary);
+		border: 1px solid transparent;
+		padding: 4px 8px;
+		font-size: 1.05em;
+	}
+	button.link:hover:not(:disabled) {
+		background: rgba(47, 93, 177, 0.08);
+	}
+	button.link.danger {
+		color: var(--color-error);
+	}
+	button.link.danger:hover:not(:disabled) {
+		background: rgba(184, 51, 60, 0.1);
 	}
 	.ok {
 		color: var(--color-success);
