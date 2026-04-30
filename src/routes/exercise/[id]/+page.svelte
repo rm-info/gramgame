@@ -179,6 +179,14 @@
 				/>
 			</div>
 
+			{#if view.blanks.length < exercise.num_blanks}
+				<aside class="truncation-note">
+					💡 Tu fais une version courte de cet exercice. Pour lire l'histoire en entier, lance-le
+					avec ses <strong>{exercise.num_blanks} trous</strong> complets depuis la page « Nouvel
+					exercice ».
+				</aside>
+			{/if}
+
 			<div class="actions">
 				<button type="button" onclick={handleSubmit} disabled={!allFilled || submitting}>
 					{submitting ? 'Correction en cours…' : "J'ai terminé"}
@@ -221,5 +229,13 @@
 		background: var(--color-primary);
 		color: white;
 		text-decoration: none;
+	}
+	.truncation-note {
+		background: rgba(47, 93, 177, 0.06);
+		border-left: 3px solid var(--color-primary);
+		padding: var(--space-3) var(--space-4);
+		border-radius: var(--radius-sm);
+		font-size: 0.95em;
+		line-height: 1.5;
 	}
 </style>
