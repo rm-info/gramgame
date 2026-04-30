@@ -41,18 +41,26 @@
 	.blank {
 		display: inline-block;
 		margin: 0 2px;
-		/* Aligne le centre du select sur le centre du texte plutôt que sa baseline,
-		   sinon la ligne se "soulève" pour faire de la place au-dessus. */
-		vertical-align: middle;
 	}
 	.blank select {
-		padding: 1px 6px;
+		/* appearance:none désactive le rendu natif (chevron, hauteur browser-dependent,
+		   ombrages). On reprend la main sur les dimensions pour qu'elles s'intègrent
+		   proprement dans la ligne de texte. */
+		appearance: none;
+		-webkit-appearance: none;
+		-moz-appearance: none;
+		font: inherit;
+		line-height: 1.4;
+		padding: 0 1.4em 0 0.4em;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
-		background: var(--color-surface);
-		font: inherit;
-		line-height: 1.2;
-		min-width: 4em;
+		background-color: var(--color-surface);
+		background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 6' fill='%23667'><path d='M0 0l4 6 4-6z'/></svg>");
+		background-repeat: no-repeat;
+		background-position: right 0.4em center;
+		background-size: 8px 6px;
+		cursor: pointer;
+		min-width: 3em;
 	}
 	.blank select:focus {
 		outline: 2px solid var(--color-primary);
