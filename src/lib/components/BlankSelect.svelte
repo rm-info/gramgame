@@ -41,13 +41,17 @@
 	.blank {
 		display: inline-block;
 		margin: 0 2px;
+		/* Aligne le centre du select sur le centre du texte plutôt que sa baseline,
+		   sinon la ligne se "soulève" pour faire de la place au-dessus. */
+		vertical-align: middle;
 	}
 	.blank select {
-		padding: 2px 8px;
+		padding: 1px 6px;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
 		background: var(--color-surface);
 		font: inherit;
+		line-height: 1.2;
 		min-width: 4em;
 	}
 	.blank select:focus {

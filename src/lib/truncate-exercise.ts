@@ -53,7 +53,7 @@ export function truncateExercise<B extends { position: number }>(
 	}
 
 	return {
-		text: text.slice(0, cutAt).trimEnd(),
+		text: text.slice(0, cutAt).trimEnd() + ' …',
 		blanks: kept
 	};
 }

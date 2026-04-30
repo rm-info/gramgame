@@ -70,7 +70,7 @@
 	.exercise-text {
 		font-family: var(--font-serif);
 		font-size: 1.15rem;
-		line-height: 2;
+		line-height: 1.8;
 		white-space: pre-wrap;
 	}
 </style>
