@@ -154,26 +154,33 @@ interface Grading {
 }
 
 function grade(exercise: ExerciseRow, responses: Record<string, string>): Grading {
+	// On ne note que les trous pour lesquels une réponse a été fournie. Ça permet
+	// à l'élève de faire une "version courte" d'un exercice (les positions
+	// au-delà du nombre demandé sont absentes de `responses`).
+	const attempted = exercise.blanks.filter((b) =>
+		Object.prototype.hasOwnProperty.call(responses, String(b.position))
+	);
+
 	const per_blank: Grading['per_blank'] = [];
 	let score = 0;
-	for (const b of exercise.blanks) {
+	for (const b of attempted) {
 		const given = responses[String(b.position)] ?? null;
 		const ok = given === b.correct;
 		if (ok) score++;
 		per_blank.push({ position: b.position, given, correct: b.correct, ok });
 	}
-	// Pour le MVP avec une règle par exercice, le breakdown est simple.
-	// On garde la structure agrégée pour permettre des exos multi-règles plus tard.
+
+	const total = attempted.length;
 	const per_rule_breakdown: Record<string, { ok: number; total: number }> = {
-		[exercise.rule_id]: { ok: score, total: exercise.blanks.length }
+		[exercise.rule_id]: { ok: score, total }
 	};
 
-	const ratio = score / exercise.blanks.length;
+	const ratio = total > 0 ? score / total : 0;
 	const suggested_next_rule_id = ratio < 0.8 ? exercise.rule_id : null;
 
 	return {
 		score,
-		score_total: exercise.blanks.length,
+		score_total: total,
 		per_blank,
 		per_rule_breakdown,
 		suggested_next_rule_id

@@ -6,6 +6,13 @@
 	import ExerciseText from '$lib/components/ExerciseText.svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { correctAttempt, type CorrectionResult } from '$lib/api/correct';
+	import { truncateExercise } from '$lib/truncate-exercise';
+
+	interface BlankRow {
+		position: number;
+		correct: string;
+		distractor: string;
+	}
 
 	interface ExerciseData {
 		id: string;
@@ -14,7 +21,7 @@
 		grade_level: string;
 		num_blanks: number;
 		text: string;
-		blanks: { position: number; correct: string; distractor: string }[];
+		blanks: BlankRow[];
 	}
 
 	interface RuleData {
@@ -34,10 +41,19 @@
 	let result = $state<CorrectionResult | null>(null);
 
 	const exerciseId = $derived(page.params.id);
+	const maxParam = $derived(Number(page.url.searchParams.get('max')) || 0);
 
-	const blankPositions = $derived(exercise?.blanks.map((b) => b.position) ?? []);
+	// Vue tronquée si ?max=N est présent et < num_blanks (sinon vue complète)
+	const view = $derived.by(() => {
+		if (!exercise) return null;
+		const requested = maxParam > 0 ? maxParam : exercise.num_blanks;
+		const effective = Math.max(1, Math.min(requested, exercise.num_blanks));
+		return truncateExercise(exercise.text, exercise.blanks, effective);
+	});
+
+	const blankPositions = $derived(view?.blanks.map((b) => b.position) ?? []);
 	const allFilled = $derived(
-		exercise && blankPositions.every((p) => responses[p] !== null && responses[p] !== undefined)
+		view && blankPositions.every((p) => responses[p] !== null && responses[p] !== undefined)
 	);
 
 	onMount(async () => {
@@ -52,7 +68,6 @@
 			return;
 		}
 		exercise = ex as ExerciseData;
-		// Initialise responses
 		for (const b of exercise.blanks) {
 			responses[b.position] = null;
 		}
@@ -72,18 +87,22 @@
 	});
 
 	async function handleSubmit() {
-		if (!exercise || !allFilled) return;
+		if (!exercise || !view || !allFilled) return;
 		submitting = true;
 		submitError = null;
 
+		// On n'envoie que les réponses des trous présents dans la vue tronquée.
+		const keptPositions = new Set(view.blanks.map((b) => b.position));
 		const payload: Record<string, string> = {};
 		for (const [pos, val] of Object.entries(responses)) {
-			if (val !== null) payload[pos] = val;
+			if (val !== null && keptPositions.has(Number(pos))) {
+				payload[pos] = val;
+			}
 		}
 
 		const username = activeUsername.username;
 		if (!username) {
-			submitError = "Aucun compte actif. Reconnecte-toi.";
+			submitError = 'Aucun compte actif. Reconnecte-toi.';
 			submitting = false;
 			return;
 		}
@@ -110,22 +129,22 @@
 			<h1>Oups</h1>
 			<p class="error">{loadError}</p>
 		</div>
-	{:else if exercise && rule}
+	{:else if exercise && rule && view}
 		{#if result}
 			<ResultView
 				{result}
 				ruleId={exercise.rule_id}
 				theme={exercise.theme}
 				gradeLevel={exercise.grade_level}
-				numBlanks={exercise.num_blanks}
+				numBlanks={view.blanks.length}
 			/>
 
 			<details class="card">
 				<summary>Voir le texte avec les corrections</summary>
 				<div style="margin-top: var(--space-4);">
 					<ExerciseText
-						text={exercise.text}
-						blankPositions={exercise.blanks.map((b) => b.position)}
+						text={view.text}
+						blankPositions={view.blanks.map((b) => b.position)}
 						options={rule.candidates}
 						bind:responses
 						readonly
@@ -137,14 +156,17 @@
 			<header class="stack">
 				<h1>{rule.display_name}</h1>
 				<p class="muted">
-					Thème : <em>{exercise.theme}</em> · Niveau : {exercise.grade_level} · {exercise.num_blanks}
-					trous
+					Thème : <em>{exercise.theme}</em> · Niveau : {exercise.grade_level} ·
+					{view.blanks.length} trous
+					{#if view.blanks.length < exercise.num_blanks}
+						<span class="muted">(version courte sur {exercise.num_blanks} possibles)</span>
+					{/if}
 				</p>
 			</header>
 
 			<div class="card">
 				<ExerciseText
-					text={exercise.text}
+					text={view.text}
 					{blankPositions}
 					options={rule.candidates}
 					bind:responses
