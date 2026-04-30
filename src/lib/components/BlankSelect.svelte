@@ -41,6 +41,12 @@
 	.blank {
 		display: inline-block;
 		margin: 0 2px;
+		/* Centré verticalement sur la ligne, pas calé en baseline (qui ferait
+		   déborder le select au-dessus du haut de ligne et étirerait la ligne). */
+		vertical-align: middle;
+		/* Hauteur explicite < line-height du paragraphe (1.8em) pour que le
+		   wrapper rentre proprement dans la ligne sans la dilater. */
+		height: 1.5em;
 	}
 	.blank select {
 		/* appearance:none désactive le rendu natif (chevron, hauteur browser-dependent,
@@ -50,8 +56,10 @@
 		-webkit-appearance: none;
 		-moz-appearance: none;
 		font: inherit;
+		height: 100%;
 		line-height: 1.4;
 		padding: 0 1.4em 0 0.4em;
+		box-sizing: border-box;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--color-surface);
@@ -61,6 +69,7 @@
 		background-size: 8px 6px;
 		cursor: pointer;
 		min-width: 3em;
+		vertical-align: top;
 	}
 	.blank select:focus {
 		outline: 2px solid var(--color-primary);
