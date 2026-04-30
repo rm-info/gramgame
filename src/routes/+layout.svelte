@@ -78,12 +78,12 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Gramgame</title>
+	<title>GramGame</title>
 </svelte:head>
 
 <header class="topbar">
 	<div class="container topbar-inner">
-		<a href={`${base}/`} class="brand">Gramgame</a>
+		<a href={`${base}/`} class="brand">GramGame</a>
 		{#if auth.user && activeUsername.username}
 			<nav class="nav">
 				{#if activeUsername.availableNames.length > 1}

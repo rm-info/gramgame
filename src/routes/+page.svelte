@@ -73,7 +73,7 @@
 		{/if}
 	</h1>
 	<p class="muted">
-		Gramgame génère pour toi des textes à trous sur la grammaire française. Choisis une règle, un
+		GramGame génère pour toi des textes à trous sur la grammaire française. Choisis une règle, un
 		thème, et l'IA te concocte un exercice sur mesure.
 	</p>
 

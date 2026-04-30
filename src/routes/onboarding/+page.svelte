@@ -8,6 +8,14 @@
 	let submitting = $state(false);
 	let errorMsg = $state<string | null>(null);
 
+	// Si le profil est déjà rempli, /onboarding n'a plus rien à offrir : on
+	// redirige vers /profile qui est l'endroit canonique pour la modification.
+	$effect(() => {
+		if (profileState.loaded && profileState.gradeLevel) {
+			goto(`${base}/profile`, { replaceState: true });
+		}
+	});
+
 	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
 		if (!gradeLevel) return;

@@ -1,4 +1,4 @@
-# Gramgame
+# GramGame
 
 Application web pédagogique : un "prof de grammaire en ligne" qui génère des textes à trous sur mesure, fait pratiquer l'élève à l'écran, corrige automatiquement, note avec appréciation et oriente vers les difficultés rencontrées.
 
