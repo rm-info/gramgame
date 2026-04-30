@@ -291,9 +291,7 @@
 					<strong>Marquer cet exercice comme vérifié.</strong>
 					{#if exercise.verified && exercise.verified_at}
 						<span class="muted small">
-							(actuellement vérifié{#if exercise.verified_by_username}
-								par <strong>{exercise.verified_by_username}</strong>{/if}
-							le {new Date(exercise.verified_at).toLocaleDateString('fr-FR')})
+							(actuellement vérifié{#if exercise.verified_by_username} par <strong>{exercise.verified_by_username}</strong>{/if} le {new Date(exercise.verified_at).toLocaleDateString('fr-FR')})
 						</span>
 					{/if}
 				</span>
