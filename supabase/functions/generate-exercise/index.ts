@@ -37,6 +37,12 @@ interface ToolOutput {
 	blanks: ToolBlank[];
 }
 
+interface RuleExample {
+	sentence: string;
+	answer: string;
+	rationale?: string;
+}
+
 interface Rule {
 	id: string;
 	display_name: string;
@@ -44,6 +50,7 @@ interface Rule {
 	rule_type: 'multiple_choice' | 'free_text';
 	candidates: string[];
 	difficulty_hint: string | null;
+	examples: RuleExample[] | null;
 }
 
 serve(async (req) => {
@@ -264,25 +271,39 @@ async function callLLM(
 ): Promise<ToolOutput> {
 	const textLength = Math.min(60 + req.num_blanks * 12, 350);
 
-	const systemPrompt = `Tu es un professeur de français expérimenté qui crée des exercices à trous pour des élèves de niveau ${req.grade_level}. Tu écris des textes narratifs, plaisants, adaptés à l'âge et au vocabulaire des élèves.`;
+	const systemPrompt = `Tu es un professeur de français expérimenté qui crée des exercices à trous pour des élèves de niveau ${req.grade_level}. Ton exigence absolue : chaque trou doit être placé à un endroit où la règle travaillée s'applique vraiment — pas n'importe où dans une phrase. Mieux vaut moins de trous que des trous mal placés.`;
 
 	const retryHint =
 		attemptIdx > 0
-			? '\n\nIMPORTANT : ta tentative précédente était invalide. Respecte STRICTEMENT le format demandé.'
+			? "\n\n⚠️ Ta tentative précédente était invalide. Cette fois, vérifie chaque trou : substitue mentalement chacun des candidats autorisés à la place du `{{N}}` — les DEUX versions doivent former des phrases entièrement bien formées (l'une est la bonne réponse, l'autre le distracteur)."
 			: '';
+
+	const examplesBlock = formatExamples(rule);
 
 	const userPrompt = `RÈGLE TRAVAILLÉE : ${rule.display_name}
 DESCRIPTION : ${rule.short_description}
 CANDIDATS AUTORISÉS pour les trous : ${JSON.stringify(rule.candidates)}
+${examplesBlock}
 
-CONSIGNES :
-- Écris un texte narratif d'environ ${textLength} mots sur le thème : « ${req.theme} ».
-- Insère EXACTEMENT ${req.num_blanks} trous portant uniquement sur la règle ci-dessus.
-- Chaque trou est marqué \`{{N}}\` où N est l'index 1-based (1, 2, 3, …, ${req.num_blanks}).
-- Numérote les trous dans l'ordre d'apparition dans le texte.
-- Pour chaque trou, fournis la bonne réponse (parmi les candidats autorisés) ET le distracteur (l'autre candidat).
-- Vérifie SOIGNEUSEMENT que chaque bonne réponse est grammaticalement correcte dans son contexte (la phrase doit avoir du sens).
-- Adapte le vocabulaire et la longueur des phrases au niveau ${req.grade_level}.${retryHint}
+PROCESSUS À SUIVRE (très important) :
+
+ÉTAPE 1 — Pense à un récit cohérent d'environ ${textLength} mots sur le thème : « ${req.theme} ». Écris-le mentalement avec tous ses mots en place (sans trous).
+
+ÉTAPE 2 — Identifie les positions où l'un des candidats ${JSON.stringify(rule.candidates)} apparaît NATURELLEMENT dans ton récit. Tu dois trouver exactement ${req.num_blanks} positions. Si tu n'en trouves pas autant naturellement, RÉÉCRIS le récit pour en ajouter — n'invente PAS des positions artificielles.
+
+ÉTAPE 3 — Remplace ces positions par \`{{1}}\`, \`{{2}}\`, …, \`{{${req.num_blanks}}}\` dans l'ordre. Pour chaque trou, fournis la bonne réponse (le candidat qui était là dans ton récit) et le distracteur (l'autre candidat).
+
+ÉTAPE 4 — Self-check OBLIGATOIRE : pour chaque trou, vérifie que substituer CHACUN des candidats produit une phrase grammaticalement complète. Si l'un des deux candidats donne une phrase agrammaticale, le trou est mal placé — supprime-le.
+
+EXEMPLES DE TROUS MAL PLACÉS (à ÉVITER absolument) :
+- "Il arrive {{?}} la gare." → MAUVAIS : on a besoin de "à la gare", ni "ou" ni "où" ne s'insère ici.
+- "Elle pense {{?}} ses vacances." → MAUVAIS : on a besoin de "à ses vacances".
+- Toute phrase où ni l'un ni l'autre des candidats ne forme une phrase correcte est INTERDITE.
+
+CONTRAINTES DE FORME :
+- Texte narratif d'environ ${textLength} mots, vocabulaire et longueur de phrases adaptés au niveau ${req.grade_level}.
+- Marqueurs \`{{N}}\` numérotés dans l'ordre d'apparition (1-based, jusqu'à ${req.num_blanks}).
+- Chaque trou : indique correct + distractor (les deux dans ${JSON.stringify(rule.candidates)}).${retryHint}
 
 Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 
@@ -358,4 +379,16 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 		throw new Error(`JSON invalide dans tool_call.arguments : ${(e as Error).message}`);
 	}
 	return args as ToolOutput;
+}
+
+function formatExamples(rule: Rule): string {
+	const ex = rule.examples;
+	if (!ex || !Array.isArray(ex) || ex.length === 0) return '';
+	const lines = ex
+		.map((e) => {
+			const rationale = e.rationale ? ` (${e.rationale})` : '';
+			return `- "${e.sentence}" → bonne réponse : "${e.answer}"${rationale}`;
+		})
+		.join('\n');
+	return `\nEXEMPLES DE TROUS BIEN PLACÉS (la règle s'applique vraiment) :\n${lines}`;
 }
