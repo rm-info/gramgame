@@ -137,7 +137,7 @@
 	}
 </script>
 
-<section class="container stack">
+<section class="container stack editor-container">
 	{#if loading}
 		<p class="muted">Chargement…</p>
 	{:else if loadError}
@@ -295,6 +295,12 @@
 		gap: var(--space-4);
 	}
 	@media (min-width: 900px) {
+		/* Élargit le container pour laisser respirer les 2 colonnes ; uniquement
+		   sur l'éditeur, pas sur les autres pages où la largeur 760px reste
+		   le bon confort de lecture. */
+		.editor-container {
+			max-width: min(1400px, calc(100vw - 2 * var(--space-4)));
+		}
 		.editor-grid {
 			grid-template-columns: 1fr 1fr;
 			align-items: stretch;
