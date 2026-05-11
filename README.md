@@ -39,7 +39,7 @@ cp .env.example .env
 npm run dev
 ```
 
-L'app est accessible sur <http://localhost:5173>.
+L'app est accessible sur <http://localhost:5174>.
 
 ## Mise en place complète (1ʳᵉ fois)
 
@@ -48,8 +48,13 @@ L'app est accessible sur <http://localhost:5173>.
 1. Aller sur <https://supabase.com>, créer un projet gratuit.
 2. Récupérer dans **Settings → API Keys** : `Project URL` et `Publishable key` (format `sb_publishable_*`). Les coller dans `.env`.
 3. Dans **Authentication → URL Configuration** :
-    - `Site URL` : `http://localhost:5173`
-    - `Redirect URLs` : ajouter `http://localhost:5173/auth-callback` et plus tard `https://<votre-user>.github.io/gramgame/auth-callback`.
+    - `Site URL` : URL publique de prod (ex. `https://gramgame.lab.rm-info.fr`). C'est le fallback que Supabase utilise si l'URL passée à `signInWithOtp` n'est pas dans la liste ci-dessous — donc à pointer vers la prod plutôt que vers un `localhost`, sinon les liens cassent dès qu'un user se trompe.
+    - `Redirect URLs` : ajouter une entrée par environnement, ex. :
+        - `https://gramgame.lab.rm-info.fr/**` (prod)
+        - `https://gramgame-dev.lab.rm-info.fr/**` (dev publique derrière Caddy)
+        - `http://localhost:5174/**` (vite local, sans Caddy)
+
+    Ces valeurs sont versionnées dans [`supabase/config.toml`](supabase/config.toml) et peuvent être poussées vers le projet hébergé avec `npx supabase config push` (la config Studio est la source de vérité, le fichier est répliqué).
 
 ### 2. Appliquer le schéma SQL
 

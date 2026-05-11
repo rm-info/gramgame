@@ -20,15 +20,35 @@ port = 54323
 
 [auth]
 enabled = true
-site_url = "http://localhost:5173"
-additional_redirect_urls = ["http://localhost:5173/**", "https://*.github.io/gramgame/**"]
+# Le Site URL est utilisé par Supabase comme fallback quand `emailRedirectTo`
+# (passé par signInWithOtp) n'est pas listé dans `additional_redirect_urls` :
+# autant le pointer sur la prod publique pour éviter d'envoyer un lien cassé.
+site_url = "https://gramgame.lab.rm-info.fr"
+# URLs autorisées pour `emailRedirectTo` (magic links) :
+# - prod publique : https://gramgame.lab.rm-info.fr (Caddy → /srv/static-apps/gramgame)
+# - dev publique  : https://gramgame-dev.lab.rm-info.fr (Caddy → reverse_proxy localhost:5174)
+# - dev local     : http://localhost:5174 (vite, quand on accède en direct sans Caddy)
+additional_redirect_urls = [
+    "https://gramgame.lab.rm-info.fr/**",
+    "https://gramgame-dev.lab.rm-info.fr/**",
+    "http://localhost:5174/**"
+]
 jwt_expiry = 3600
 enable_signup = true
 
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
-enable_confirmations = false
+# Aligné sur l'état actuel de la console (remote) — les defaults de la CLI
+# diffèrent et écraseraient ces valeurs lors d'un `supabase config push`.
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+
+# MFA TOTP activé côté remote — explicité ici pour la même raison.
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
 
 # Edge function : signin est l'entrée pour utilisateurs non authentifiés
 # (inscription + connexion par username). On désactive la vérification JWT
