@@ -1,122 +1,33 @@
 import { auth } from './auth.svelte';
-import { supabase } from './supabase';
+import type { Role } from './pb';
 
-const STORAGE_KEY = 'gramgame.active_username';
-
-export type Role = 'user' | 'prof' | 'admin';
-
-interface UsernameRow {
-	username: string;
-	role: Role;
-}
+export type { Role };
 
 /**
- * Username "actif" pour la session courante (parmi ceux que l'utilisateur
- * possède). Persisté en localStorage pour rester d'une session navigateur à
- * l'autre.
+ * Vue pratique sur le compte actif (nom, rôle, comptes disponibles).
+ * Tout l'état vit dans `auth` ; ici ce ne sont que des accesseurs.
  */
-class ActiveUsernameState {
-	username: string | null = $state(null);
-	available: UsernameRow[] = $state([]);
-	loaded = $state(false);
-	loading = $state(false);
-
-	availableNames = $derived(this.available.map((u) => u.username));
-	role: Role = $derived(
-		(this.available.find((u) => u.username === this.username)?.role ?? 'user') as Role
-	);
-	isAdmin = $derived(this.role === 'admin');
-	canEditExercises = $derived(this.role === 'prof' || this.role === 'admin');
-
-	async load() {
-		if (typeof window === 'undefined') return;
-
-		if (!auth.user) {
-			this.username = null;
-			this.available = [];
-			this.loaded = true;
-			return;
-		}
-
-		this.loading = true;
-		const { data, error } = await supabase
-			.from('usernames')
-			.select('username, role')
-			.eq('user_id', auth.user.id);
-		this.loading = false;
-		this.loaded = true;
-
-		if (error) {
-			console.error('Failed to load owned usernames', error);
-			this.available = [];
-			return;
-		}
-
-		this.available = (data ?? []) as UsernameRow[];
-
-		const stored = localStorage.getItem(STORAGE_KEY);
-		const names = this.availableNames;
-		if (stored && names.includes(stored)) {
-			this.username = stored;
-		} else if (names.length > 0) {
-			this.username = names[0];
-			localStorage.setItem(STORAGE_KEY, this.username);
-		} else {
-			this.username = null;
-			localStorage.removeItem(STORAGE_KEY);
-		}
+class ActiveUsername {
+	get username(): string | null {
+		return auth.user?.username ?? null;
 	}
-
-	set(name: string) {
-		if (!this.availableNames.includes(name)) {
-			throw new Error(`Username "${name}" non disponible.`);
-		}
-		this.username = name;
-		if (typeof window !== 'undefined') {
-			localStorage.setItem(STORAGE_KEY, name);
-		}
+	get availableNames(): string[] {
+		const names = new Set(auth.accounts);
+		if (auth.user) names.add(auth.user.username);
+		return [...names].sort();
 	}
-
-	/**
-	 * Tente de "claim" un username via une fonction Postgres SECURITY DEFINER
-	 * (côté serveur, à l'abri des subtilités RLS). Idempotent : si déjà claim
-	 * par l'utilisateur courant, retourne ok.
-	 */
-	async claim(name: string): Promise<{ ok: boolean; reason?: string }> {
-		if (!auth.user) return { ok: false, reason: 'Pas de session.' };
-
-		const { data, error } = await supabase.rpc('claim_username', {
-			target_username: name
-		});
-
-		if (error) {
-			console.error('claim_username rpc failed', error);
-			return { ok: false, reason: error.message };
-		}
-
-		if (data === 'ok') return { ok: true };
-
-		const reasons: Record<string, string> = {
-			not_authenticated: 'Pas de session active.',
-			no_email: 'Aucun email associé à ta session.',
-			not_found: `Le compte « ${name} » n'existe pas.`,
-			taken_by_other: `Le compte « ${name} » appartient à un autre utilisateur.`,
-			email_mismatch: `L'email de ta session (${auth.user.email ?? '?'}) ne correspond pas à l'email d'inscription du compte « ${name} ». Reconnecte-toi avec le bon email, ou refais une inscription.`
-		};
-		return {
-			ok: false,
-			reason: reasons[data as string] ?? `Erreur inattendue : ${data}`
-		};
+	get role(): Role {
+		return auth.user?.role ?? 'user';
 	}
-
-	reset() {
-		this.username = null;
-		this.available = [];
-		this.loaded = false;
-		if (typeof window !== 'undefined') {
-			localStorage.removeItem(STORAGE_KEY);
-		}
+	get isAdmin() {
+		return this.role === 'admin';
+	}
+	get canEditExercises() {
+		return this.role === 'prof' || this.role === 'admin';
+	}
+	get loaded() {
+		return !auth.loading;
 	}
 }
 
-export const activeUsername = new ActiveUsernameState();
+export const activeUsername = new ActiveUsername();

@@ -1,33 +1,19 @@
-import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_PUBLISHABLE_KEY } from '$env/static/public';
-import { supabase } from '$lib/supabase';
+import { pb } from '$lib/pb';
 
 /**
- * Appelle une edge function Supabase via fetch direct, pour avoir un contrôle
- * total sur la lecture du corps de réponse — y compris en cas d'erreur HTTP.
- *
- * Pourquoi pas `supabase.functions.invoke` : selon la version de supabase-js,
- * invoke consomme le body de la Response en interne et renvoie `data: null`
- * sur non-2xx, rendant le message d'erreur structuré ({ error: "..." }) du
- * backend irrécupérable. En passant par fetch direct on évite ce piège.
+ * Appelle une route custom PocketBase (/api/gram/<name>) en POST JSON.
+ * Les routes renvoient { error, debug? } en cas d'échec ; on remonte le
+ * message lisible tel quel.
  */
-export async function invokeFunction<T>(
-	name: string,
-	body: Record<string, unknown>
-): Promise<T> {
-	const session = (await supabase.auth.getSession()).data.session;
-	const accessToken = session?.access_token ?? PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-	const url = `${PUBLIC_SUPABASE_URL}/functions/v1/${name}`;
+export async function callGram<T>(name: string, body: Record<string, unknown>): Promise<T> {
+	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+	if (pb.authStore.isValid) headers.Authorization = pb.authStore.token;
 
 	let response: Response;
 	try {
-		response = await fetch(url, {
+		response = await fetch(`/api/gram/${name}`, {
 			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				apikey: PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-				Authorization: `Bearer ${accessToken}`
-			},
+			headers,
 			body: JSON.stringify(body)
 		});
 	} catch {
@@ -40,28 +26,26 @@ export async function invokeFunction<T>(
 		try {
 			parsed = JSON.parse(text);
 		} catch {
-			// Corps non-JSON (probable page d'erreur HTML de la plateforme)
+			// corps non-JSON (page d'erreur du reverse proxy…)
 		}
 	}
 
 	if (!response.ok) {
-		if (
-			parsed &&
-			typeof parsed === 'object' &&
-			'error' in parsed &&
-			typeof (parsed as { error: unknown }).error === 'string'
-		) {
-			const friendly = (parsed as { error: string }).error.trim();
-			const debug = (parsed as { debug?: unknown }).debug;
-			if (friendly) {
-				const debugStr =
-					typeof debug === 'string' && debug.trim() ? ` (détail : ${debug})` : '';
-				throw new Error(`${friendly}${debugStr}`);
-			}
+		const p = (parsed ?? {}) as { error?: unknown; message?: unknown; debug?: unknown };
+		const friendly =
+			typeof p.error === 'string' && p.error.trim()
+				? p.error.trim()
+				: response.status === 429
+					? 'Trop de requêtes. Patiente une minute avant de réessayer.'
+					: typeof p.message === 'string' && p.message.trim()
+						? p.message.trim()
+						: '';
+		if (friendly) {
+			const debugStr =
+				typeof p.debug === 'string' && p.debug.trim() ? ` (détail : ${p.debug})` : '';
+			throw new Error(`${friendly}${debugStr}`);
 		}
-		throw new Error(
-			`Erreur serveur (HTTP ${response.status}). Réessaie dans un instant.`
-		);
+		throw new Error(`Erreur serveur (HTTP ${response.status}). Réessaie dans un instant.`);
 	}
 
 	return parsed as T;

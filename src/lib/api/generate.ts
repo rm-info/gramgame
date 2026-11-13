@@ -1,7 +1,6 @@
-import { invokeFunction } from './_helpers';
+import { callGram } from './_helpers';
 
 export interface GenerateInput {
-	username: string;
 	rule_id: string;
 	theme: string;
 	grade_level: string;
@@ -16,5 +15,5 @@ export interface GeneratedExercise {
 }
 
 export function generateExercise(input: GenerateInput): Promise<GeneratedExercise> {
-	return invokeFunction<GeneratedExercise>('generate-exercise', input as unknown as Record<string, unknown>);
+	return callGram<GeneratedExercise>('generate', input as unknown as Record<string, unknown>);
 }

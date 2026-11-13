@@ -3,7 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { pb, errorMessage } from '$lib/pb';
+	import { mapExercise, type ExerciseRow } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
 
 	interface BlankRow {
@@ -64,13 +65,14 @@
 	});
 
 	onMount(async () => {
-		const { data: ex, error: exError } = await supabase
-			.from('exercises')
-			.select('*')
-			.eq('id', exerciseId)
-			.single();
-		if (exError || !ex) {
-			loadError = exError?.message ?? 'Exercice introuvable.';
+		let ex: ExerciseRow;
+		try {
+			ex = mapExercise(
+				await pb.collection('exercises').getOne(exerciseId ?? '', { expand: 'rule' })
+			);
+		} catch (e) {
+			loadError =
+				(e as { status?: number })?.status === 404 ? 'Exercice introuvable.' : errorMessage(e);
 			loading = false;
 			return;
 		}
@@ -81,17 +83,12 @@
 			.sort((a, b) => a.position - b.position);
 		editVerified = exercise.verified;
 
-		const { data: r, error: rError } = await supabase
-			.from('rules')
-			.select('id, display_name, candidates')
-			.eq('id', exercise.rule_id)
-			.single();
-		if (rError || !r) {
-			loadError = rError?.message ?? 'Règle introuvable.';
+		if (!ex.rule) {
+			loadError = 'Règle introuvable.';
 			loading = false;
 			return;
 		}
-		rule = r as RuleData;
+		rule = ex.rule;
 		loading = false;
 	});
 
@@ -126,45 +123,33 @@
 		saveError = null;
 		saveMsg = null;
 
-		// Si l'état "vérifié" a basculé, on met à jour les méta de vérification.
-		// Sinon on les laisse intactes (ne pas écraser un précédent verified_at
-		// quand on fait juste une correction de typo sans toucher au flag).
-		const verifiedChanged = editVerified !== exercise.verified;
-		const verificationFields = verifiedChanged
-			? editVerified
-				? {
-						verified: true,
-						verified_at: new Date().toISOString(),
-						verified_by_username: activeUsername.username
-					}
-				: {
-						verified: false,
-						verified_at: null,
-						verified_by_username: null
-					}
-			: {};
+		// On n'envoie le flag que s'il a basculé : le serveur pose alors
+		// verified_at / verified_by_username (et les préserve sinon).
+		const verificationFields =
+			editVerified !== exercise.verified ? { verified: editVerified } : {};
 
-		const { error } = await supabase
-			.from('exercises')
-			.update({
-				text: editText,
-				blanks: editBlanks,
-				num_blanks: editBlanks.length,
-				...verificationFields
-			})
-			.eq('id', exercise.id);
-		saving = false;
-		if (error) {
-			saveError = error.message;
+		// Les méta de vérification (date, auteur) sont posées côté serveur.
+		let updated: ExerciseRow;
+		try {
+			updated = mapExercise(
+				await pb.collection('exercises').update(exercise.id, {
+					text: editText,
+					blanks: editBlanks,
+					num_blanks: editBlanks.length,
+					...verificationFields
+				})
+			);
+		} catch (e) {
+			saving = false;
+			saveError = errorMessage(e);
 			return;
 		}
+		saving = false;
 		// Synchronise l'état local pour que les prochains saves comparent
 		// correctement.
-		if (verifiedChanged) {
-			exercise.verified = editVerified;
-			exercise.verified_at = editVerified ? new Date().toISOString() : null;
-			exercise.verified_by_username = editVerified ? (activeUsername.username ?? null) : null;
-		}
+		exercise.verified = updated.verified;
+		exercise.verified_at = updated.verified_at;
+		exercise.verified_by_username = updated.verified_by_username;
 		saveMsg = 'Modifications enregistrées.';
 	}
 </script>

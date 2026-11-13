@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { pb, errorMessage } from '$lib/pb';
+	import { mapExercise } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
 
 	interface ExerciseRow {
@@ -28,20 +29,21 @@
 		if (!activeUsername.canEditExercises) return;
 		loading = true;
 		loadError = null;
-		supabase
-			.from('exercises')
-			.select(
-				'id, rule_id, theme, grade_level, num_blanks, created_at, created_by_username, llm_model, verified, verified_at, verified_by_username, rule:rules ( display_name )'
-			)
-			.order('created_at', { ascending: false })
-			.limit(200)
-			.then(({ data, error }) => {
+		pb.collection('exercises')
+			.getList(1, 200, {
+				sort: '-created',
+				expand: 'rule',
+				fields:
+					'id,rule,theme,grade_level,num_blanks,created,owner_username,llm_model,verified,verified_at,verified_by_username,expand.rule.id,expand.rule.display_name'
+			})
+			.then((res) => {
+				exercises = res.items.map(mapExercise) as unknown as ExerciseRow[];
+			})
+			.catch((e) => {
+				loadError = errorMessage(e);
+			})
+			.finally(() => {
 				loading = false;
-				if (error) {
-					loadError = error.message;
-					return;
-				}
-				exercises = (data ?? []) as unknown as ExerciseRow[];
 			});
 	});
 

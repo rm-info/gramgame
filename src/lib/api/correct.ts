@@ -1,7 +1,6 @@
-import { invokeFunction } from './_helpers';
+import { callGram } from './_helpers';
 
 export interface CorrectInput {
-	username: string;
 	exercise_id: string;
 	responses: Record<string, string>;
 }
@@ -23,5 +22,5 @@ export interface CorrectionResult {
 }
 
 export function correctAttempt(input: CorrectInput): Promise<CorrectionResult> {
-	return invokeFunction<CorrectionResult>('correct-attempt', input as unknown as Record<string, unknown>);
+	return callGram<CorrectionResult>('correct', input as unknown as Record<string, unknown>);
 }

@@ -2,167 +2,160 @@
 
 Application web pédagogique : un "prof de grammaire en ligne" qui génère des textes à trous sur mesure, fait pratiquer l'élève à l'écran, corrige automatiquement, note avec appréciation et oriente vers les difficultés rencontrées.
 
-**Stack** : SvelteKit (static export) + Supabase (Postgres + Auth + Edge Functions) + LLM (Gemini par défaut, n'importe quel provider compatible OpenAI). Hébergement gratuit sur GitHub Pages.
+**Stack** : SvelteKit (export statique) + [PocketBase](https://pocketbase.io) (SQLite + auth + hooks JS) + LLM (Gemini par défaut, n'importe quel provider compatible OpenAI). Auto-hébergé : un seul process, ~20–50 Mo de RAM.
 
-## Stack et architecture
+## Architecture
 
 ```
-┌─────────────────────────────┐    ┌──────────────────────────┐
-│ Frontend statique           │    │ Supabase                 │
-│ (GitHub Pages, gratuit)     │    │  ├── Postgres (data)     │
-│ - SvelteKit + adapter-static│◄──►│  ├── Auth (magic link)   │
-│ - Appelle Supabase via SDK  │    │  └── Edge Functions      │
-└─────────────────────────────┘    │       └── LLM (HTTP) →   │
-                                    └──────────────────────────┘
-                                              │
-                                              ▼
-                                    ┌──────────────────────────┐
-                                    │ Provider LLM             │
-                                    │ Gemini 2.0 Flash défaut  │
-                                    │ (free tier 1500 req/jour)│
-                                    └──────────────────────────┘
+┌──────────── navigateur ────────────┐
+│ SvelteKit (SPA statique)           │
+│ SDK pocketbase, même origine       │
+└───────────────┬────────────────────┘
+                │ HTTPS
+        ┌───────▼────────┐
+        │ Caddy          │  (TLS, reverse proxy)
+        └───────┬────────┘
+                │ 127.0.0.1:8090
+┌───────────────▼──────────────────────────────┐
+│ PocketBase (1 binaire Go)                    │
+│  ├── pb_public/   front buildé (servi tel quel)│
+│  ├── pb_data/     SQLite + backups           │
+│  ├── pb_migrations/ schéma + seed des règles │
+│  └── pb_hooks/    routes /api/gram/*, garde-fous│
+└───────────────┬──────────────────────────────┘
+                │ HTTPS (sortant)
+        ┌───────▼────────┐   ┌──────────┐
+        │ Provider LLM   │   │ SMTP     │ (codes de connexion)
+        └────────────────┘   └──────────┘
 ```
 
-La clé API LLM ne sort **jamais** du serveur : elle vit dans les secrets Supabase, est utilisée uniquement par les Edge Functions.
+La clé API LLM ne sort jamais du serveur : elle est dans `pocketbase/.env`, utilisée uniquement par les hooks.
 
-## Démarrage local
+## Installation sur le serveur
+
+Prérequis : `git`, `curl`, `unzip`, Node.js ≥ 20 (pour builder le front), Caddy.
 
 ```sh
-# 1. Installer les dépendances
+sudo useradd --system --create-home --home-dir /var/lib/gramgame --shell /usr/sbin/nologin gramgame
+sudo git clone https://github.com/rm-info/gramgame.git /srv/gramgame
+sudo chown -R gramgame:gramgame /srv/gramgame
+cd /srv/gramgame
+sudo -u gramgame ./pocketbase/install.sh
+```
+
+`install.sh` télécharge le binaire PocketBase (version figée, checksum vérifié, amd64/arm64/armv7), builde le front dans `pocketbase/pb_public/` et crée `pocketbase/.env`.
+
+### 1. Config
+
+Éditer `pocketbase/.env` : clé LLM, SMTP, URL publique. Tout est commenté dans [`pocketbase/.env.example`](pocketbase/.env.example). Les réglages SMTP/URL sont réappliqués à chaque démarrage.
+
+### 2. Service systemd
+
+```sh
+sudo cp pocketbase/gramgame.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now gramgame
+journalctl -u gramgame -f
+```
+
+Le fichier suppose le repo dans `/srv/gramgame` et un user `gramgame` : adapter sinon. (`ProtectHome=true` empêche de lancer depuis un `/home/...` : retirer la ligne dans ce cas.)
+
+Au premier démarrage, les migrations créent le schéma et les règles `ou/où`, `a/à`.
+
+### 3. Caddy
+
+```caddy
+gramgame.lab.rm-info.fr {
+	reverse_proxy 127.0.0.1:8090
+}
+```
+
+Optionnel, pour ne laisser l'admin PocketBase (`/_/`) accessible que depuis le LAN / tailnet :
+
+```caddy
+gramgame.lab.rm-info.fr {
+	@admin {
+		path /_/*
+		not remote_ip private_ranges 100.64.0.0/10
+	}
+	respond @admin 403
+	reverse_proxy 127.0.0.1:8090
+}
+```
+
+### 4. Premier compte
+
+- Le **premier compte créé** via « Créer un compte » devient automatiquement **admin** de l'app.
+- Pour l'admin technique de PocketBase (`/_/` : données brutes, logs, backups) :
+
+  ```sh
+  sudo -u gramgame ./pocketbase/pocketbase superuser upsert toi@example.org 'un-mot-de-passe-long' --dir pocketbase/pb_data
+  ```
+
+### Mise à jour
+
+```sh
+cd /srv/gramgame
+sudo -u gramgame git pull
+sudo -u gramgame ./pocketbase/install.sh
+sudo systemctl restart gramgame
+```
+
+Les nouvelles migrations (`pb_migrations/`) s'appliquent au redémarrage.
+
+### Sauvegardes
+
+Backup automatique quotidien (03h30, 7 conservés) dans `pocketbase/pb_data/backups/`. Pour une copie hors machine, sauvegarder ce dossier (ou tout `pb_data/`). Restauration possible depuis l'admin `/_/` → Settings → Backups.
+
+## Développement local
+
+```sh
 npm install
-
-# 2. Copier les variables d'env et remplir avec votre projet Supabase
-cp .env.example .env
-# Éditer .env : PUBLIC_SUPABASE_URL et PUBLIC_SUPABASE_PUBLISHABLE_KEY
-
-# 3. Lancer le dev server
-npm run dev
+./pocketbase/install.sh        # 1ʳᵉ fois : binaire PocketBase + .env
+./pocketbase/run.sh            # PocketBase sur 127.0.0.1:8090
+npm run dev                    # vite sur :5174, proxifie /api et /_ vers PocketBase
 ```
 
-L'app est accessible sur <http://localhost:5174>.
+Pour un PocketBase sur un autre port : `PB_HTTP=127.0.0.1:8091 ./pocketbase/run.sh` et `PB_URL=http://127.0.0.1:8091 npm run dev`. Une instance de dev dans un clone séparé a ses propres données (`pb_data/` est par clone).
 
-## Mise en place complète (1ʳᵉ fois)
-
-### 1. Créer le projet Supabase
-
-1. Aller sur <https://supabase.com>, créer un projet gratuit.
-2. Récupérer dans **Settings → API Keys** : `Project URL` et `Publishable key` (format `sb_publishable_*`). Les coller dans `.env`.
-3. Dans **Authentication → URL Configuration** :
-    - `Site URL` : URL publique de prod (ex. `https://gramgame.lab.rm-info.fr`). C'est le fallback que Supabase utilise si l'URL passée à `signInWithOtp` n'est pas dans la liste ci-dessous — donc à pointer vers la prod plutôt que vers un `localhost`, sinon les liens cassent dès qu'un user se trompe.
-    - `Redirect URLs` : ajouter une entrée par environnement, ex. :
-        - `https://gramgame.lab.rm-info.fr/**` (prod)
-        - `https://gramgame-dev.lab.rm-info.fr/**` (dev publique derrière Caddy)
-        - `http://localhost:5174/**` (vite local, sans Caddy)
-
-    Ces valeurs sont versionnées dans [`supabase/config.toml`](supabase/config.toml) et peuvent être poussées vers le projet hébergé avec `npx supabase config push` (la config Studio est la source de vérité, le fichier est répliqué).
-
-### 2. Appliquer le schéma SQL
-
-La CLI Supabase est installée comme **dev-dependency du projet** (déjà via `npm install`). On l'invoque avec `npx supabase ...`.
-
-> Note : Supabase bloque explicitement l'install globale via npm — voir <https://github.com/supabase/cli#install-the-cli>. La méthode locale est plus propre (CLI versionnée avec le projet via `package-lock.json`).
-
-```sh
-npx supabase login
-npx supabase link --project-ref <votre-project-ref>
-npx supabase db push
-```
-
-Ou : copier le contenu de `supabase/migrations/0001_initial_schema.sql` puis `0002_seed_rules.sql` dans **SQL Editor** sur l'interface Supabase et exécuter.
-
-### 3. Configurer le provider LLM
-
-L'app utilise **n'importe quelle API compatible OpenAI** via 3 secrets Supabase. Par défaut elle est configurée pour **Gemini** (free tier généreux, ~750 exos/jour gratuits).
-
-**Option A — Gemini (recommandé pour démarrer, $0)**
-
-1. Créer une API key sur <https://aistudio.google.com/app/apikey>.
-2. La stocker comme secret Supabase :
-
-```sh
-npx supabase secrets set LLM_API_KEY=AIza...
-```
-
-C'est tout — `LLM_BASE_URL` et `LLM_MODEL` ont déjà des défauts Gemini-friendly (`gemini-2.0-flash`). Free tier : 15 req/min, 1500 req/jour.
-
-**Option B — OpenRouter (multi-modèles, ~0,01 €/exercice avec Claude Haiku)**
-
-```sh
-npx supabase secrets set LLM_API_KEY=sk-or-v1-xxxxx
-npx supabase secrets set LLM_BASE_URL=https://openrouter.ai/api/v1
-npx supabase secrets set LLM_MODEL=anthropic/claude-haiku-4-5
-```
-
-OpenRouter propose aussi des modèles `:free` (Llama, Mistral, Qwen) à $0 avec rate limits — voir <https://openrouter.ai/models?max_price=0>.
-
-**Option C — Mistral, OpenAI, Anthropic direct**
-
-Même principe : 3 secrets pour pointer vers leur endpoint OpenAI-compatible et choisir un modèle.
-
-### 4. Déployer les Edge Functions
-
-```sh
-npx supabase functions deploy signin
-npx supabase functions deploy generate-exercise
-npx supabase functions deploy correct-attempt
-```
-
-### 5. Vérification locale
-
-```sh
-npm run dev
-```
-
-Aller sur <http://localhost:5173>, créer un compte par magic link, faire l'onboarding, lancer un exercice. Le flow doit fonctionner E2E.
-
-### 6. Déploiement sur GitHub Pages
-
-1. Créer le repo `gramgame` sur GitHub, pusher le code (`git push -u origin main`).
-2. Dans **Settings → Pages** du repo, choisir **Source : GitHub Actions**.
-3. Dans **Settings → Secrets and variables → Actions**, ajouter :
-    - `PUBLIC_SUPABASE_URL`
-    - `PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-4. Pousser sur `main` → le workflow `.github/workflows/deploy.yml` se déclenche, build le site sous `/gramgame/` et le publie.
-5. Mettre à jour les **Redirect URLs** Supabase pour inclure `https://<votre-user>.github.io/gramgame/auth-callback`.
+Les hooks (`pb_hooks/`) sont rechargés automatiquement par PocketBase quand ils changent ; le front, lui, a besoin d'un `npm run build` pour être servi par PocketBase.
 
 ## Modèle d'authentification
 
-- **Inscription** : nom d'utilisateur (3-20 caractères, lettres/chiffres/-/_) + email.
-- **Connexion** : nom d'utilisateur seul. Le système retrouve l'email associé et envoie un magic link.
-- **Plusieurs apprenants dans une famille** : un même email peut être réutilisé pour plusieurs noms d'utilisateur distincts (ex : "lea" et "tom" partagent `parent@gmail.com`). Chaque compte a sa progression à lui ; les magic links arrivent tous dans la même boîte mail.
+- **Inscription** : nom d'utilisateur (3-20 caractères, lettres/chiffres/-/_) + email. Un code à 6 chiffres est envoyé par mail.
+- **Connexion** : nom d'utilisateur seul → code par mail (valable 15 min, 1 envoi/minute max, 5 essais max par code).
+- **Plusieurs apprenants dans une famille** : un même email peut servir pour plusieurs noms d'utilisateur (ex. « lea » et « tom » avec `parent@gmail.com`). Les codes arrivent tous dans la même boîte, chaque compte a sa progression. Une fois plusieurs comptes connectés sur un navigateur, le sélecteur en haut permet de basculer **sans redemander de code** (« + Ajouter un compte… » pour en connecter un autre).
 
-**Modèle technique** : 1 email = 1 `auth.users` (Supabase). N usernames possibles peuvent pointer vers le même auth user (table `usernames`, FK `user_id`). À chaque magic link, le username demandé est passé en query param (`?username=lea`) ; au callback, l'app le "claim" (UPDATE usernames SET user_id) et le mémorise comme username actif (localStorage). Toutes les données (profil, exercices, tentatives) sont indexées par username, pas par auth user.
+**Technique** : 1 nom d'utilisateur = 1 enregistrement de la collection auth `users`. PocketBase exige un `email` unique : il reçoit une adresse synthétique non routable (`<username>@users.gramgame.invalid`) et l'adresse réelle est dans `real_email` ; le hook `onMailerRecordOTPSend` redirige les codes vers elle. Aucun `+tag` dans les adresses, donc compatible avec tous les fournisseurs mail. Le front garde un token par compte connecté (localStorage).
 
-**Conséquence pour un parent** : il reçoit un magic link distinct pour chaque enfant (`/auth-callback?username=lea` puis `/auth-callback?username=tom`), mais sur **la même boîte mail**. Une fois connecté, un sélecteur en haut de l'app permet de basculer d'un compte à l'autre **sans relogin**.
+Un compte dont le code n'a jamais été saisi reste « en attente » et est supprimé au bout de 7 jours (libère le nom).
+
+### Rôles
+
+- `user` (défaut) : ses exercices et tentatives.
+- `prof` : voit et édite tous les exercices, peut les marquer « vérifiés ».
+- `admin` : + gestion des rôles, des comptes et des règles.
+
+Garde-fous côté serveur (`pb_hooks/gramgame.pb.js`) : impossible de modifier son propre rôle, de rétrograder ou supprimer le dernier admin ; la date et l'auteur de vérification d'un exercice sont posés par le serveur.
 
 ## Ajouter une règle de grammaire
 
-Pour ajouter une règle d'homophone (ex : `son/sont`), il suffit d'insérer une ligne dans la table `rules` :
+Depuis l'app : **Gestion → Règles** (admin). Ou depuis l'admin PocketBase `/_/` → collection `rules`.
 
-```sql
-insert into public.rules (id, display_name, short_description, rule_type, candidates, difficulty_hint) values
-  ('son-sont', 'son / sont',
-   'Distinction entre l''adjectif possessif "son" et le verbe "sont" (être conjugué).',
-   'multiple_choice',
-   '["son", "sont"]'::jsonb,
-   'CE2');
-```
-
-La nouvelle règle apparaît automatiquement dans le sélecteur de `/new`. Aucun changement de code.
-
-Pour les règles de type `free_text` (accords, conjugaison), une logique de validation supplémentaire devra être ajoutée — c'est pour une itération future.
+Une règle = un `id` (ex. `son-sont`), un nom affiché, une description, les candidats (`["son", "sont"]`) et des exemples optionnels qui guident le LLM. Elle apparaît immédiatement dans `/new`. Seul le type `multiple_choice` est géré pour l'instant.
 
 ## Coûts
 
-- **Hébergement** : 0 € (GitHub Pages + tier gratuit Supabase).
-- **LLM** : 0 € avec Gemini (free tier de 1500 requêtes/jour, soit ~750 exercices/jour). Si tu passes à un modèle payant : ~0,005 € par génération + ~0,002 € par correction (Claude Haiku 4.5 via OpenRouter), soit ~0,01 €/exercice complet.
+- **Hébergement** : la machine existante.
+- **LLM** : 0 € avec Gemini (free tier ~1500 requêtes/jour, soit ~750 exercices/jour). Avec un modèle payant : ~0,005 € par génération + ~0,002 € par correction (Claude Haiku via OpenRouter).
 
 ## Scripts
 
-- `npm run dev` — dev server
-- `npm run build` — production build (vers `build/`)
-- `npm run preview` — preview du build
+- `npm run dev` — dev server (proxy vers PocketBase)
+- `npm run build` — build du front dans `pocketbase/pb_public/`
 - `npm run check` — type-check Svelte + TS
+- `pocketbase/install.sh` — installe / met à jour (binaire + build)
+- `pocketbase/run.sh` — lance PocketBase avec `pocketbase/.env`
 
 ## Structure
 
@@ -170,40 +163,28 @@ Pour les règles de type `free_text` (accords, conjugaison), une logique de vali
 gramgame/
 ├── src/
 │   ├── lib/
-│   │   ├── supabase.ts            # client Supabase singleton
-│   │   ├── auth.svelte.ts         # store d'état d'auth
-│   │   ├── profile.svelte.ts      # store de profil utilisateur
-│   │   ├── api/
-│   │   │   ├── generate.ts        # invoke generate-exercise
-│   │   │   └── correct.ts         # invoke correct-attempt
-│   │   └── components/
-│   │       ├── BlankSelect.svelte
-│   │       ├── ExerciseText.svelte
-│   │       └── ResultView.svelte
-│   └── routes/
-│       ├── +layout.svelte         # nav + redirections d'auth
-│       ├── +page.svelte           # accueil avec dernières tentatives
-│       ├── login/                 # magic link
-│       ├── auth-callback/
-│       ├── onboarding/            # prénom + niveau
-│       ├── new/                   # formulaire de génération
-│       └── exercise/[id]/         # exécution + correction
-└── supabase/
-    ├── config.toml
-    ├── migrations/                # schéma + seed (SQL versionné)
-    └── functions/
-        ├── _shared/cors.ts
-        ├── generate-exercise/
-        └── correct-attempt/
+│   │   ├── pb.ts                  # client PocketBase (même origine)
+│   │   ├── auth.svelte.ts         # session + comptes multiples
+│   │   ├── active-username.svelte.ts  # accesseurs compte actif / rôle
+│   │   ├── profile.svelte.ts      # niveau scolaire
+│   │   ├── data.ts                # normalisation des records
+│   │   ├── api/                   # appels /api/gram/* + OTP
+│   │   └── components/            # BlankSelect, ExerciseText, ResultView, CodeStep
+│   └── routes/                    # login, signup, onboarding, new, exercise, profile, admin
+└── pocketbase/
+    ├── install.sh / run.sh
+    ├── gramgame.service           # unité systemd
+    ├── .env.example
+    ├── pb_migrations/             # schéma, API rules, seed, réglages
+    └── pb_hooks/
+        ├── gramgame.pb.js         # routes /api/gram/*, garde-fous, cron
+        └── lib/gram.js            # OTP, prompts LLM, validation, notation
 ```
 
 ## Décisions architecturales
 
-Voir le plan complet : `/home/lokifaer/.claude-tdt/plans/tout-l-heure-j-ai-vivid-dove.md` (généré pendant la phase de cadrage).
-
-Points clés :
-- **1 compte = 1 apprenant** (pas de profils multiples). Sub-addressing email pour les familles.
-- **Génération LLM à la demande** + persistance de chaque exercice (id stable). Ouvre la voie au partage en cercle plus tard sans refonte.
-- **Validation programmatique stricte** côté Edge Function : la sortie LLM est vérifiée (nb de trous, candidats valides, marqueurs présents) avant persistance, retry max 2 sinon erreur claire. Pas de "fallback silencieux" — on enseigne, donc afficher du faux serait inacceptable.
-- **RLS** : un utilisateur ne voit que ses propres `exercises` et `attempts`. Le catalogue `rules` est en lecture publique.
-- **Détection de difficulté** : l'app suggère automatiquement un exercice ciblé sur la règle la plus ratée à la fin de chaque correction.
+- **Génération LLM à la demande** + persistance de chaque exercice (id stable).
+- **Validation programmatique stricte** de la sortie LLM (nb de trous, candidats valides, marqueurs présents), retry max 2 sinon erreur claire. Pas de fallback silencieux : afficher du faux serait inacceptable pour un outil d'apprentissage.
+- **API rules** : un utilisateur ne voit que ses exercices et tentatives ; profs/admins voient tous les exercices. Le catalogue `rules` est en lecture publique. Exercices et tentatives ne sont créés que par les routes serveur.
+- **Rate limiting** activé (inscription/connexion 5/min/IP, génération 10/min, correction 20/min).
+- **Détection de difficulté** : à la fin d'une correction sous 80 %, l'app propose un exercice ciblé sur la même règle.

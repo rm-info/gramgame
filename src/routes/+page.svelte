@@ -1,51 +1,33 @@
 <script lang="ts">
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { pb } from '$lib/pb';
+	import { auth } from '$lib/auth.svelte';
 	import { activeUsername } from '$lib/active-username.svelte';
-
-	interface AttemptRow {
-		id: string;
-		score: number;
-		score_total: number;
-		completed_at: string;
-		exercise: {
-			id: string;
-			theme: string;
-			rule_id: string;
-			rule: { display_name: string } | null;
-		} | null;
-	}
+	import { mapAttempt, type AttemptRow } from '$lib/data';
 
 	let attempts = $state<AttemptRow[]>([]);
 	let loadingAttempts = $state(true);
 
 	$effect(() => {
-		const username = activeUsername.username;
-		if (!username) {
+		const userId = auth.user?.id;
+		if (!userId) {
 			attempts = [];
 			loadingAttempts = false;
 			return;
 		}
 		loadingAttempts = true;
-		supabase
-			.from('attempts')
-			.select(
-				`id, score, score_total, completed_at,
-				 exercise:exercises (
-					id, theme, rule_id,
-					rule:rules ( display_name )
-				 )`
-			)
-			.eq('username', username)
-			.order('completed_at', { ascending: false })
-			.limit(10)
-			.then(({ data, error }) => {
+		pb.collection('attempts')
+			.getList(1, 10, {
+				filter: pb.filter('user = {:id}', { id: userId }),
+				sort: '-created',
+				expand: 'exercise.rule'
+			})
+			.then((res) => {
+				attempts = res.items.map(mapAttempt);
+			})
+			.catch((e) => console.error('Failed to load attempts', e))
+			.finally(() => {
 				loadingAttempts = false;
-				if (error) {
-					console.error('Failed to load attempts', error);
-					return;
-				}
-				attempts = (data ?? []) as unknown as AttemptRow[];
 			});
 	});
 

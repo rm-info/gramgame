@@ -1,53 +1,22 @@
-import { supabase } from './supabase';
-import { activeUsername } from './active-username.svelte';
+import { auth } from './auth.svelte';
+import { pb, type UserRecord } from './pb';
 
+/** Préférences pédagogiques du compte actif (stockées sur le record users). */
 class ProfileState {
-	gradeLevel: string | null = $state(null);
-	loading = $state(false);
-	loaded = $state(false);
-	loadedFor: string | null = $state(null);
-
-	async load() {
-		const username = activeUsername.username;
-		if (!username) {
-			this.gradeLevel = null;
-			this.loaded = true;
-			this.loadedFor = null;
-			return;
-		}
-		this.loading = true;
-		const { data, error } = await supabase
-			.from('user_profiles')
-			.select('grade_level')
-			.eq('username', username)
-			.maybeSingle();
-		this.loading = false;
-		this.loaded = true;
-		this.loadedFor = username;
-		if (error) {
-			console.error('Failed to load profile', error);
-			this.gradeLevel = null;
-			return;
-		}
-		this.gradeLevel = data?.grade_level ?? null;
+	get gradeLevel(): string | null {
+		return auth.user?.grade_level || null;
+	}
+	get loaded() {
+		return !auth.loading;
 	}
 
 	async upsertGradeLevel(grade: string) {
-		const username = activeUsername.username;
-		if (!username) throw new Error('Pas de username actif.');
-		const { error } = await supabase
-			.from('user_profiles')
-			.upsert({ username, grade_level: grade });
-		if (error) throw error;
-		this.gradeLevel = grade;
-		this.loaded = true;
-		this.loadedFor = username;
-	}
-
-	reset() {
-		this.gradeLevel = null;
-		this.loaded = false;
-		this.loadedFor = null;
+		const user = auth.user;
+		if (!user) throw new Error('Pas de compte actif.');
+		const updated = await pb
+			.collection('users')
+			.update<UserRecord>(user.id, { grade_level: grade });
+		auth.setRecord(updated);
 	}
 }
 

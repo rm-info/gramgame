@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { auth } from '$lib/auth.svelte';
+	import { pb, errorMessage } from '$lib/pb';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { GRADE_LEVELS, profileState } from '$lib/profile.svelte';
 
@@ -47,19 +48,18 @@
 		deleting = true;
 		deleteError = null;
 
-		const { supabase } = await import('$lib/supabase');
-		const { error } = await supabase.from('usernames').delete().eq('username', username);
-		if (error) {
+		try {
+			await pb.collection('users').delete(auth.user!.id);
+		} catch (e) {
 			deleting = false;
-			deleteError = error.message;
+			deleteError = errorMessage(e);
 			return;
 		}
 
-		// Compte supprimé : on déconnecte et on redirige vers /login.
+		// Compte supprimé : on le retire de la session (bascule sur un autre
+		// compte de ce navigateur s'il y en a un).
 		await auth.signOut();
-		profileState.reset();
-		activeUsername.reset();
-		goto(`${base}/login`, { replaceState: true });
+		goto(auth.user ? `${base}/` : `${base}/login`, { replaceState: true });
 	}
 </script>
 
@@ -77,7 +77,7 @@
 
 			<dt>Email</dt>
 			<dd>
-				{auth.user?.email ?? '—'}
+				{auth.user?.real_email ?? '—'}
 				<span class="muted note">(changement d'email à venir)</span>
 			</dd>
 

@@ -3,7 +3,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { pb } from '$lib/pb';
+	import { auth } from '$lib/auth.svelte';
+	import { mapExercise } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { profileState, GRADE_LEVELS } from '$lib/profile.svelte';
 	import { generateExercise } from '$lib/api/generate';
@@ -52,17 +54,17 @@
 	];
 
 	onMount(async () => {
-		const { data, error } = await supabase
-			.from('rules')
-			.select('id, display_name, short_description, candidates')
-			.eq('rule_type', 'multiple_choice')
-			.order('id');
-		rulesLoading = false;
-		if (error) {
-			rulesError = error.message;
-		} else {
-			rules = (data ?? []) as RuleOption[];
+		try {
+			const data = await pb.collection('rules').getFullList({
+				filter: "rule_type = 'multiple_choice'",
+				sort: 'id',
+				fields: 'id,display_name,short_description,candidates'
+			});
+			rules = data as unknown as RuleOption[];
+		} catch (e) {
+			rulesError = (e as Error).message;
 		}
+		rulesLoading = false;
 
 		// Pré-remplissage depuis query params (cas "exercice ciblé").
 		// Doit se faire après le chargement des règles pour valider rule_id.
@@ -85,33 +87,32 @@
 	// après le mount du composant si le layout charge encore l'auth).
 	let lastFetchedFor: string | null = null;
 	$effect(() => {
-		const username = activeUsername.username;
-		if (!username) {
+		const userId = auth.user?.id;
+		if (!userId) {
 			pastExercises = [];
 			pastLoading = !activeUsername.loaded;
 			return;
 		}
-		if (lastFetchedFor === username) return;
-		lastFetchedFor = username;
+		if (lastFetchedFor === userId) return;
+		lastFetchedFor = userId;
 		pastLoading = true;
-		supabase
-			.from('exercises')
-			.select(
-				'id, rule_id, theme, grade_level, num_blanks, created_at, verified, rule:rules ( display_name )'
-			)
-			.eq('created_by_username', username)
-			.order('created_at', { ascending: false })
-			.limit(20)
-			.then(({ data, error }) => {
-				pastLoading = false;
-				if (error) {
-					console.error('Failed to load past exercises', error);
-					return;
-				}
-				pastExercises = (data ?? []) as unknown as PastExercise[];
+		pb.collection('exercises')
+			.getList(1, 20, {
+				filter: pb.filter('owner = {:id}', { id: userId }),
+				sort: '-created',
+				expand: 'rule',
+				fields:
+					'id,rule,theme,grade_level,num_blanks,created,verified,expand.rule.id,expand.rule.display_name'
+			})
+			.then((res) => {
+				pastExercises = res.items.map(mapExercise) as unknown as PastExercise[];
 				for (const ex of pastExercises) {
 					pastSelectedBlanks[ex.id] = ex.num_blanks;
 				}
+			})
+			.catch((e) => console.error('Failed to load past exercises', e))
+			.finally(() => {
+				pastLoading = false;
 			});
 	});
 
@@ -121,15 +122,13 @@
 		submitting = true;
 		errorMsg = null;
 
-		const username = activeUsername.username;
-		if (!username) {
+		if (!auth.user) {
 			errorMsg = 'Aucun compte actif. Reconnecte-toi.';
 			submitting = false;
 			return;
 		}
 		try {
 			const ex = await generateExercise({
-				username,
 				rule_id: ruleId,
 				theme: theme.trim(),
 				grade_level: gradeLevel,

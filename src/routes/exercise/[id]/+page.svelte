@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { pb, errorMessage } from '$lib/pb';
+	import { mapExercise, type ExerciseRow } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import ExerciseText from '$lib/components/ExerciseText.svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
@@ -61,13 +62,14 @@
 	);
 
 	onMount(async () => {
-		const { data: ex, error: exError } = await supabase
-			.from('exercises')
-			.select('*')
-			.eq('id', exerciseId)
-			.single();
-		if (exError || !ex) {
-			loadError = exError?.message ?? 'Exercice introuvable.';
+		let ex: ExerciseRow;
+		try {
+			ex = mapExercise(
+				await pb.collection('exercises').getOne(exerciseId ?? '', { expand: 'rule' })
+			);
+		} catch (e) {
+			loadError =
+				(e as { status?: number })?.status === 404 ? 'Exercice introuvable.' : errorMessage(e);
 			loading = false;
 			return;
 		}
@@ -76,17 +78,12 @@
 			responses[b.position] = null;
 		}
 
-		const { data: r, error: rError } = await supabase
-			.from('rules')
-			.select('id, display_name, candidates')
-			.eq('id', exercise.rule_id)
-			.single();
-		if (rError || !r) {
-			loadError = rError?.message ?? 'Règle introuvable.';
+		if (!ex.rule) {
+			loadError = 'Règle introuvable.';
 			loading = false;
 			return;
 		}
-		rule = r as RuleData;
+		rule = ex.rule;
 		loading = false;
 	});
 
@@ -104,15 +101,8 @@
 			}
 		}
 
-		const username = activeUsername.username;
-		if (!username) {
-			submitError = 'Aucun compte actif. Reconnecte-toi.';
-			submitting = false;
-			return;
-		}
 		try {
 			result = await correctAttempt({
-				username,
 				exercise_id: exercise.id,
 				responses: payload
 			});

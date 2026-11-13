@@ -1,6 +1,10 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
+// En dev, PocketBase tourne à côté (par défaut 127.0.0.1:8090) : on proxifie
+// l'API et l'admin pour rester en same-origin, comme en prod.
+const PB_URL = process.env.PB_URL ?? 'http://127.0.0.1:8090';
+
 export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
@@ -13,6 +17,10 @@ export default defineConfig({
 		strictPort: true,
 		// Hostnames autorisés (protection anti-DNS-rebinding). Préfixe `.` = wildcard
 		// de suffixe : `.ts.net` couvre tout le tailnet, `.local` couvre mDNS/Bonjour.
-		allowedHosts: ['localhost', 'belzebold', '.ts.net', '.local', 'gramgame-dev.lab.rm-info.fr']
+		allowedHosts: ['localhost', 'belzebold', '.ts.net', '.local', 'gramgame-dev.lab.rm-info.fr'],
+		proxy: {
+			'/api': { target: PB_URL, changeOrigin: false },
+			'/_': { target: PB_URL, changeOrigin: false }
+		}
 	}
 });

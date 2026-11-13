@@ -1,0 +1,38 @@
+# Service systemd GramGame (PocketBase).
+#
+# Installation (adapter User et les chemins si le repo n'est pas dans /srv/gramgame) :
+#   sudo cp pocketbase/gramgame.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gramgame
+#   journalctl -u gramgame -f
+
+[Unit]
+Description=GramGame (PocketBase)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gramgame
+Group=gramgame
+WorkingDirectory=/srv/gramgame/pocketbase
+EnvironmentFile=/srv/gramgame/pocketbase/.env
+ExecStart=/srv/gramgame/pocketbase/run.sh
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=4096
+
+# Machine partagée : priorité CPU/IO basse.
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+# Durcissement
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/gramgame/pocketbase/pb_data
+
+[Install]
+WantedBy=multi-user.target

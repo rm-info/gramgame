@@ -1,27 +1,34 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import { loginWithUsername } from '$lib/api/signin';
+	import CodeStep from '$lib/components/CodeStep.svelte';
 
 	let username = $state('');
 	let submitting = $state(false);
-	let sent = $state(false);
+	let otpId = $state<string | null>(null);
 	let emailHint = $state('');
 	let errorMsg = $state<string | null>(null);
 
+	onMount(() => {
+		const u = page.url.searchParams.get('username');
+		if (u) username = u;
+	});
+
+	async function requestCode(): Promise<string> {
+		const result = await loginWithUsername({ username: username.trim().toLowerCase() });
+		emailHint = result.email_hint;
+		return result.otpId;
+	}
+
 	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
-		const u = username.trim().toLowerCase();
-		if (!u) return;
+		if (!username.trim()) return;
 		submitting = true;
 		errorMsg = null;
-
 		try {
-			const result = await loginWithUsername({
-				username: u,
-				redirect_to: `${window.location.origin}${base}/auth-callback`
-			});
-			emailHint = result.email_hint;
-			sent = true;
+			otpId = await requestCode();
 		} catch (e) {
 			errorMsg = (e as Error).message;
 		} finally {
@@ -33,17 +40,8 @@
 <section class="container stack">
 	<h1>Connexion</h1>
 
-	{#if sent}
-		<div class="card stack">
-			<h2>Lien envoyé !</h2>
-			<p>
-				Un lien de connexion a été envoyé à <strong>{emailHint}</strong>. Ouvre ta boîte mail et
-				clique sur le lien.
-			</p>
-			<p class="muted">
-				Le lien fonctionne pendant 1 heure. Si tu ne le vois pas, vérifie ton dossier spam.
-			</p>
-		</div>
+	{#if otpId}
+		<CodeStep {otpId} {emailHint} onResend={requestCode} onCancel={() => (otpId = null)} />
 	{:else}
 		<div class="card stack">
 			<form onsubmit={handleSubmit} class="stack">
@@ -62,7 +60,7 @@
 					/>
 				</div>
 				<button type="submit" disabled={submitting || !username.trim()}>
-					{submitting ? 'Envoi…' : 'Recevoir un lien magique'}
+					{submitting ? 'Envoi…' : 'Recevoir un code par mail'}
 				</button>
 				{#if errorMsg}
 					<p class="error">{errorMsg}</p>

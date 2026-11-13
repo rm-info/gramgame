@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { pb, errorMessage } from '$lib/pb';
 	import { activeUsername } from '$lib/active-username.svelte';
 
 	type RuleType = 'multiple_choice' | 'free_text';
@@ -60,16 +60,20 @@
 	async function loadRules() {
 		loading = true;
 		loadError = null;
-		const { data, error } = await supabase
-			.from('rules')
-			.select('id, display_name, short_description, rule_type, candidates, difficulty_hint, examples')
-			.order('id');
-		loading = false;
-		if (error) {
-			loadError = error.message;
-			return;
+		try {
+			const data = await pb.collection('rules').getFullList({
+				sort: 'id',
+				fields: 'id,display_name,short_description,rule_type,candidates,difficulty_hint,examples'
+			});
+			rules = data.map((r) => ({
+				...(r as unknown as Rule),
+				difficulty_hint: r.difficulty_hint || null,
+				examples: Array.isArray(r.examples) ? r.examples : null
+			}));
+		} catch (e) {
+			loadError = errorMessage(e);
 		}
-		rules = (data ?? []) as Rule[];
+		loading = false;
 	}
 
 	function emptyForm(): FormState {
@@ -210,18 +214,22 @@
 			examples: form.examples.length > 0 ? form.examples : null
 		};
 
-		let error;
-		if (form.mode === 'edit' && form.original_id) {
-			// L'ID est immutable (FK). On update tout sauf l'ID.
-			const { id: _ignore, ...updateFields } = payload;
-			({ error } = await supabase.from('rules').update(updateFields).eq('id', form.original_id));
-		} else {
-			({ error } = await supabase.from('rules').insert(payload));
+		let error: string | null = null;
+		try {
+			if (form.mode === 'edit' && form.original_id) {
+				// L'ID est immutable (référencé par les exercices). On update tout sauf l'ID.
+				const { id: _ignore, ...updateFields } = payload;
+				await pb.collection('rules').update(form.original_id, updateFields);
+			} else {
+				await pb.collection('rules').create(payload);
+			}
+		} catch (e) {
+			error = ruleSaveError(e);
 		}
 
 		saving = false;
 		if (error) {
-			saveError = error.message;
+			saveError = error;
 			return;
 		}
 		saveMsg = form.mode === 'edit' ? 'Règle mise à jour.' : 'Règle créée.';
@@ -237,14 +245,28 @@
 		);
 		if (!ok) return;
 		deleting = r.id;
-		const { error } = await supabase.from('rules').delete().eq('id', r.id);
-		deleting = null;
-		if (error) {
-			saveError = `Échec : ${error.message}`;
+		try {
+			await pb.collection('rules').delete(r.id);
+		} catch (e) {
+			deleting = null;
+			saveError =
+				(e as { status?: number })?.status === 400
+					? 'Échec : des exercices utilisent encore cette règle. Supprime-les d\'abord.'
+					: `Échec : ${errorMessage(e)}`;
 			return;
 		}
+		deleting = null;
 		saveMsg = `Règle « ${r.display_name} » supprimée.`;
 		await loadRules();
+	}
+
+	function ruleSaveError(e: unknown): string {
+		const data = (e as { response?: { data?: Record<string, { message?: string }> } })?.response
+			?.data;
+		if (data?.id) return `ID déjà utilisé ou invalide (${data.id.message ?? ''}).`;
+		const first = data && Object.entries(data)[0];
+		if (first) return `${first[0]} : ${first[1]?.message ?? 'invalide'}`;
+		return errorMessage(e);
 	}
 
 	function onCandidateKey(e: KeyboardEvent) {

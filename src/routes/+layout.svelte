@@ -11,7 +11,8 @@
 
 	let { children } = $props();
 
-	const PUBLIC_ROUTES = new Set(['/login', '/signup', '/auth-callback']);
+	const PUBLIC_ROUTES = new Set(['/login', '/signup']);
+	const ADD_ACCOUNT = '__add__';
 
 	onMount(async () => {
 		await auth.init();
@@ -27,50 +28,37 @@
 			return;
 		}
 
-		if (auth.user && !activeUsername.loaded) {
-			activeUsername.load().then(() => {
-				if (activeUsername.username) profileState.load();
-			});
-			return;
-		}
-
-		if (
-			auth.user &&
-			activeUsername.loaded &&
-			activeUsername.username &&
-			profileState.loadedFor !== activeUsername.username
-		) {
-			profileState.load();
-			return;
-		}
-
-		// Si l'utilisateur a une session mais aucun username (cas dégradé) ou
-		// pas de profil pour le username actif, direction onboarding.
-		if (
-			auth.user &&
-			activeUsername.loaded &&
-			activeUsername.username &&
-			profileState.loaded &&
-			profileState.loadedFor === activeUsername.username &&
-			!profileState.gradeLevel &&
-			path !== '/onboarding'
-		) {
+		// Pas encore de niveau scolaire pour ce compte : direction onboarding.
+		if (auth.user && !profileState.gradeLevel && !isPublic && path !== '/onboarding') {
 			goto(`${base}/onboarding`, { replaceState: true });
 		}
 	});
 
 	async function handleSignOut() {
 		await auth.signOut();
-		profileState.reset();
-		activeUsername.reset();
-		goto(`${base}/login`, { replaceState: true });
+		if (auth.user) {
+			await invalidateAll();
+			goto(`${base}/`, { replaceState: true });
+		} else {
+			goto(`${base}/login`, { replaceState: true });
+		}
 	}
 
-	async function switchUsername(name: string) {
+	async function switchUsername(select: HTMLSelectElement) {
+		const name = select.value;
+		// Le <select> reste sur le compte actif tant que la bascule n'est pas faite.
+		select.value = activeUsername.username ?? '';
+		if (name === ADD_ACCOUNT) {
+			goto(`${base}/login`);
+			return;
+		}
 		if (name === activeUsername.username) return;
-		activeUsername.set(name);
-		profileState.reset();
-		await profileState.load();
+		const ok = await auth.switchTo(name);
+		if (!ok) {
+			// Session expirée pour ce compte : on redemande un code.
+			goto(`${base}/login?username=${encodeURIComponent(name)}`);
+			return;
+		}
 		await invalidateAll();
 		goto(`${base}/`, { replaceState: true });
 	}
@@ -91,13 +79,15 @@
 						<span class="muted">Compte :</span>
 						<select
 							value={activeUsername.username}
-							onchange={(e) => switchUsername((e.currentTarget as HTMLSelectElement).value)}
+							onchange={(e) => switchUsername(e.currentTarget as HTMLSelectElement)}
 						>
 							{#each activeUsername.availableNames as u (u)}
 								<option value={u}>{u}</option>
 							{/each}
+							<option value={ADD_ACCOUNT}>+ Ajouter un compte…</option>
 						</select>
 					</label>
+					<a href={`${base}/profile`} class="profile-link">Profil</a>
 				{:else}
 					<a href={`${base}/profile`} class="profile-link">{activeUsername.username}</a>
 				{/if}
@@ -147,7 +137,11 @@
 		align-items: center;
 		gap: var(--space-2);
 	}
+	.switcher span {
+		white-space: nowrap;
+	}
 	.switcher select {
+		width: auto;
 		padding: 4px 8px;
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);

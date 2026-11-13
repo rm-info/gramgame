@@ -1,15 +1,29 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
-	import { supabase } from '$lib/supabase';
+	import { pb, errorMessage, type UserRecord } from '$lib/pb';
 	import { activeUsername, type Role } from '$lib/active-username.svelte';
 
 	interface UserRow {
+		id: string;
 		username: string;
 		real_email: string;
 		role: Role;
 		created_at: string;
-		user_id: string | null;
+		/** false = code jamais saisi (compte jamais activé) */
+		verified: boolean;
+	}
+
+	async function fetchUsers(): Promise<UserRow[]> {
+		const list = await pb.collection('users').getFullList<UserRecord>({ sort: 'created' });
+		return list.map((u) => ({
+			id: u.id,
+			username: u.username,
+			real_email: u.real_email,
+			role: u.role,
+			created_at: u.created,
+			verified: u.verified
+		}));
 	}
 
 	let users = $state<UserRow[]>([]);
@@ -33,22 +47,20 @@
 		if (!activeUsername.isAdmin) return;
 		loading = true;
 		loadError = null;
-		supabase
-			.from('usernames')
-			.select('username, real_email, role, created_at, user_id')
-			.order('created_at', { ascending: true })
-			.then(({ data, error }) => {
+		fetchUsers()
+			.then((list) => {
+				users = list;
+			})
+			.catch((e) => {
+				loadError = errorMessage(e);
+			})
+			.finally(() => {
 				loading = false;
-				if (error) {
-					loadError = error.message;
-					return;
-				}
-				users = (data ?? []) as UserRow[];
 			});
 	});
 
 	async function deleteUser(u: UserRow) {
-		const status = u.user_id ? 'activé' : 'en attente (jamais finalisé)';
+		const status = u.verified ? 'activé' : 'en attente (jamais finalisé)';
 		const ok = confirm(
 			`Supprimer le compte « ${u.username} » (${u.real_email}, ${status}) ?\n\n` +
 				`Tous ses exercices et tentatives seront aussi supprimés.\n` +
@@ -58,12 +70,14 @@
 
 		updating[u.username] = true;
 		updateMsg = null;
-		const { error } = await supabase.from('usernames').delete().eq('username', u.username);
-		updating[u.username] = false;
-		if (error) {
-			updateMsg = `Échec : ${error.message}`;
+		try {
+			await pb.collection('users').delete(u.id);
+		} catch (e) {
+			updating[u.username] = false;
+			updateMsg = `Échec : ${errorMessage(e)}`;
 			return;
 		}
+		updating[u.username] = false;
 		users = users.filter((x) => x.username !== u.username);
 		updateMsg = `Compte « ${u.username} » supprimé.`;
 	}
@@ -73,28 +87,24 @@
 		// (le trigger 0009 empêche aussi côté DB).
 		if (username === activeUsername.username) {
 			updateMsg = 'Tu ne peux pas modifier ton propre rôle.';
-			const { data } = await supabase
-				.from('usernames')
-				.select('username, real_email, role, created_at, user_id')
-				.order('created_at', { ascending: true });
-			if (data) users = data as UserRow[];
+			users = await fetchUsers().catch(() => users);
 			return;
 		}
 
 		updating[username] = true;
 		updateMsg = null;
-		const { error } = await supabase
-			.from('usernames')
-			.update({ role: newRole })
-			.eq('username', username);
+		const target = users.find((x) => x.username === username);
+		let failure: string | null = null;
+		try {
+			if (!target) throw new Error('Compte introuvable.');
+			await pb.collection('users').update(target.id, { role: newRole });
+		} catch (e) {
+			failure = errorMessage(e);
+		}
 		updating[username] = false;
-		if (error) {
-			updateMsg = `Échec : ${error.message}`;
-			const { data } = await supabase
-				.from('usernames')
-				.select('username, real_email, role, created_at, user_id')
-				.order('created_at', { ascending: true });
-			if (data) users = data as UserRow[];
+		if (failure) {
+			updateMsg = `Échec : ${failure}`;
+			users = await fetchUsers().catch(() => users);
 			return;
 		}
 		const u = users.find((x) => x.username === username);
@@ -168,7 +178,7 @@
 							</td>
 							<td class="muted">{formatDate(u.created_at)}</td>
 							<td class="muted">
-								{#if u.user_id}
+								{#if u.verified}
 									<span class="ok">activé</span>
 								{:else}
 									<span class="pending">en attente</span>
