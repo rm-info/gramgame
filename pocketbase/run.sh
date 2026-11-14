@@ -5,11 +5,16 @@ set -euo pipefail
 
 PB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Lecture littérale KEY=VALUE (comme `docker --env-file` / systemd) : on ne
+# `source` PAS le fichier, sinon un mot de passe contenant ( { $ ` ou des
+# espaces casse le démarrage, voire s'exécute comme du shell.
 if [ -f "$PB_DIR/.env" ]; then
-	set -a
-	# shellcheck disable=SC1091
-	. "$PB_DIR/.env"
-	set +a
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in '' | \#*) continue ;; esac
+		key="${line%%=*}"
+		[[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+		export "$key=${line#*=}"
+	done <"$PB_DIR/.env"
 fi
 
 exec "$PB_DIR/pocketbase" serve \
