@@ -164,7 +164,7 @@ Une règle = un `id` (ex. `son-sont`), un nom affiché, une description, les can
 
 **Groupes de confusion** : une règle peut mélanger plusieurs confusions, ex. `on-son-et` = `on / ont`, `son / sont`, `et / es / est`. En mode normal, chaque trou ne propose que les mots de son groupe ; en **mode difficile** (case sur la page de l'exercice, verrouillée dès la première réponse), tous les candidats. La correction détaille le score par confusion, et l'appréciation cible la plus ratée. Les trous en début de phrase affichent les mots avec majuscule ; la comparaison ignore casse et type d'apostrophe (`'` / `’`).
 
-Règles livrées (programme CM2, période 1) : `a-a-ou-ou`, `on-son-et`, `se-ce-ses-ces` (`se / ce` et `ses / ces / s'est / c'est`), `ni-ny-si-sy`, plus `a-a`, `ou-ou`, `ni-ny` et `si-sy` seules.
+Règles livrées (programme CM2, période 1) : `a-a-ou-ou`, `on-son-et`, `se-ce-ses-ces` (`se / ce` et `ses / ces / s'est / c'est`), `ni-ny-si-sy` (révisions mélangées), et une règle par confusion : `a-a`, `ou-ou`, `on-ont`, `son-sont`, `et-es-est`, `se-ce`, `ses-ces`, `ni-ny`, `si-sy`.
 
 ## Coûts
 
