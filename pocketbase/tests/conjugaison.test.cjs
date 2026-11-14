@@ -70,4 +70,14 @@ for (const [v, exp] of Object.entries({ vêtir: 'vêts,vêts,vêt,vêtons,vêtez
   if (got !== exp) { fail++; console.log('✗', v, got); }
 }
 if (c.verbGroup('maudire') !== 3 || c.verbGroup("s'évanouir") !== 2) { fail++; console.log('✗ groupes maudire / s\'évanouir'); }
+// Dérivés : formes exactes pour la famille de « recevoir » (le dérivé ne se
+// termine pas par la base), et pour tous : chaque forme garde le début du verbe.
+for (const [v, exp] of Object.entries({ apercevoir: 'aperçois,aperçois,aperçoit,apercevons,apercevez,aperçoivent', décevoir: 'déçois,déçois,déçoit,décevons,décevez,déçoivent', concevoir: 'conçois,conçois,conçoit,concevons,concevez,conçoivent' })) {
+  const got = (c.conjugate(v) || []).map(f => f.join('|')).join(',');
+  if (got !== exp) { fail++; console.log('✗', v, got); }
+}
+for (const list of Object.values(c.DERIVED)) for (const v of list) {
+  const forms = (c.conjugate(v) || []).flat();
+  if (forms.length < 6 || forms.some(f => !f.startsWith(v.slice(0, 2)))) { fail++; console.log('✗ dérivé', v, forms.join(',')); }
+}
 console.log(fail ? `${fail} échec(s)` : 'tout OK', '·', Object.keys(expect).length, 'verbes vérifiés'); if (fail) process.exit(1);

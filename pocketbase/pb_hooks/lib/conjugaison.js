@@ -128,8 +128,18 @@ function split(forms) {
 	return forms.split(',').map((f) => f.split('|'));
 }
 
-function fromBase(prefix, base) {
-	return split(IRREGULAR[base]).map((variants) => variants.map((f) => prefix + f));
+/**
+ * Formes d'un dérivé à partir de sa base. Le dérivé ne se termine pas
+ * toujours par la base : « apercevoir » ne partage que « -cevoir » avec
+ * « recevoir ». On remplace donc ce qui précède la partie commune
+ * (« re » → « aper ») : reçois → aperçois, recevons → apercevons.
+ */
+function fromBase(verb, base) {
+	let common = 0;
+	while (common < base.length && verb[verb.length - 1 - common] === base[base.length - 1 - common]) common++;
+	const cut = base.length - common;
+	const prefix = verb.slice(0, verb.length - common);
+	return split(IRREGULAR[base]).map((variants) => variants.map((f) => prefix + f.slice(cut)));
 }
 
 /** Variante réforme 1990 : î → i (connaît → connait, plaît → plait). */
@@ -185,7 +195,7 @@ function conjugate(rawVerb) {
 
 	if (IRREGULAR[verb]) return split(IRREGULAR[verb]);
 	for (const base of Object.keys(DERIVED)) {
-		if (DERIVED[base].includes(verb)) return fromBase(verb.slice(0, verb.length - base.length), base);
+		if (DERIVED[base].includes(verb)) return fromBase(verb, base);
 	}
 	if (LIKE_ER.includes(verb)) {
 		const stem = verb.slice(0, -2);
@@ -500,6 +510,7 @@ const GROUP_SENTENCES = {
 
 module.exports = {
 	PERSONS,
+	DERIVED,
 	PERSON_LABELS,
 	POOLS,
 	GROUP_SENTENCES,
