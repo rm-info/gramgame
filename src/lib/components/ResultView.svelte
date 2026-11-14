@@ -5,12 +5,25 @@
 	interface Props {
 		result: CorrectionResult;
 		ruleId: string;
+		ruleName?: string;
 		theme: string;
 		gradeLevel: string;
 		numBlanks: number;
 	}
 
-	let { result, ruleId, theme, gradeLevel, numBlanks }: Props = $props();
+	let { result, ruleId, ruleName, theme, gradeLevel, numBlanks }: Props = $props();
+
+	// Une ligne par confusion si la règle en a plusieurs, sinon une ligne pour la règle.
+	const breakdown = $derived(
+		result.per_group_breakdown && Object.keys(result.per_group_breakdown).length > 0
+			? Object.entries(result.per_group_breakdown)
+			: Object.entries(result.per_rule_breakdown).map(
+					([id, v]) => [id === ruleId && ruleName ? ruleName : id, v] as const
+				)
+	);
+	const byGroup = $derived(
+		!!result.per_group_breakdown && Object.keys(result.per_group_breakdown).length > 0
+	);
 
 	const note = $derived(Math.round((result.score / result.score_total) * 200) / 10);
 
@@ -31,14 +44,15 @@
 			<span class="note">{note.toFixed(1)}</span><span class="muted">/20</span>
 		</div>
 		<div class="ratio muted">
-			{result.score} / {result.score_total} bonnes réponses
+			{result.score} / {result.score_total} bonnes réponses{#if result.hard_mode}&nbsp;· mode
+				difficile{/if}
 		</div>
 	</header>
 
 	<section class="stack">
-		<h3>Détail par règle</h3>
+		<h3>{byGroup ? 'Détail par confusion' : 'Détail par règle'}</h3>
 		<ul class="breakdown">
-			{#each Object.entries(result.per_rule_breakdown) as [rule, { ok, total }] (rule)}
+			{#each breakdown as [rule, { ok, total }] (rule)}
 				{@const ratio = ok / total}
 				{@const status = ratio === 1 ? '✅' : ratio >= 0.6 ? '🟡' : '⚠️'}
 				<li>
@@ -58,7 +72,11 @@
 	<section class="actions">
 		{#if result.suggested_next_rule_id}
 			<a href={buildTargetedUrl(result.suggested_next_rule_id)}>
-				<button type="button">Lance un exercice ciblé sur {result.suggested_next_rule_id}</button>
+				<button type="button"
+					>Lance un exercice ciblé sur {result.suggested_next_rule_id === ruleId && ruleName
+						? ruleName
+						: result.suggested_next_rule_id}</button
+				>
 			</a>
 		{/if}
 		<a href={`${base}/new`}>

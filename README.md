@@ -160,7 +160,11 @@ Garde-fous côté serveur (`pb_hooks/gramgame.pb.js`) : impossible de modifier s
 
 Depuis l'app : **Gestion → Règles** (admin). Ou depuis l'admin PocketBase `/_/` → collection `rules`.
 
-Une règle = un `id` (ex. `son-sont`), un nom affiché, une description, les candidats (`["son", "sont"]`) et des exemples optionnels qui guident le LLM. Elle apparaît immédiatement dans `/new`. Seul le type `multiple_choice` est géré pour l'instant.
+Une règle = un `id` (ex. `son-sont`), un nom affiché, une description, les candidats (`["son", "sont"]`), des **groupes de confusion** optionnels et des exemples qui guident le LLM. Elle apparaît immédiatement dans `/new`. Seul le type `multiple_choice` est géré pour l'instant.
+
+**Groupes de confusion** : une règle peut mélanger plusieurs confusions, ex. `on-son-et` = `on / ont`, `son / sont`, `et / es / est`. En mode normal, chaque trou ne propose que les mots de son groupe ; en **mode difficile** (case sur la page de l'exercice, verrouillée dès la première réponse), tous les candidats. La correction détaille le score par confusion, et l'appréciation cible la plus ratée. Les trous en début de phrase affichent les mots avec majuscule ; la comparaison ignore casse et type d'apostrophe (`'` / `’`).
+
+Règles livrées (programme CM2, période 1) : `a-a-ou-ou`, `on-son-et`, `se-ce-ses-ces` (`se / ce` et `ses / ces / s'est / c'est`), `ni-ny-si-sy`, plus `a-a` et `ou-ou` seules.
 
 ## Coûts
 

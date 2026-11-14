@@ -1,20 +1,30 @@
 <script lang="ts">
 	import BlankSelect from './BlankSelect.svelte';
 	import type { PerBlank } from '$lib/api/correct';
+	import { startsSentence } from '$lib/confusion';
 
 	interface Props {
 		text: string;
 		blankPositions: number[];
-		options: string[];
+		/** Options du menu pour un trou donné (groupe de confusion ou tous les candidats). */
+		optionsFor: (position: number) => string[];
 		responses: Record<number, string | null>;
 		readonly?: boolean;
 		results?: PerBlank[] | null;
 	}
 
-	let { text, blankPositions, options, responses = $bindable(), readonly = false, results = null }: Props =
-		$props();
+	let {
+		text,
+		blankPositions,
+		optionsFor,
+		responses = $bindable(),
+		readonly = false,
+		results = null
+	}: Props = $props();
 
-	type Segment = { kind: 'text'; value: string } | { kind: 'blank'; position: number };
+	type Segment =
+		| { kind: 'text'; value: string }
+		| { kind: 'blank'; position: number; capitalize: boolean };
 
 	const segments: Segment[] = $derived.by(() => {
 		const positionSet = new Set(blankPositions);
@@ -28,7 +38,7 @@
 			}
 			const pos = Number(m[1]);
 			if (positionSet.has(pos)) {
-				out.push({ kind: 'blank', position: pos });
+				out.push({ kind: 'blank', position: pos, capitalize: startsSentence(text.slice(0, idx)) });
 			} else {
 				out.push({ kind: 'text', value: m[0] });
 			}
@@ -57,7 +67,8 @@
 	{#each segments as seg, i (i)}
 		{#if seg.kind === 'text'}{seg.value}{:else}<BlankSelect
 				position={seg.position}
-				{options}
+				options={optionsFor(seg.position)}
+				capitalize={seg.capitalize}
 				bind:value={responses[seg.position]}
 				{readonly}
 				state={blankState(seg.position)}

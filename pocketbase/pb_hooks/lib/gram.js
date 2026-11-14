@@ -202,30 +202,107 @@ function validateGenerateRequest(b) {
 	return null;
 }
 
-function validateExercise(ex, rule, numBlanks) {
-	if (!ex || !ex.text || typeof ex.text !== 'string') return 'Texte manquant.';
-	if (!Array.isArray(ex.blanks)) return 'Liste de trous manquante.';
-	if (ex.blanks.length !== numBlanks) {
-		return `Nombre de trous incorrect : attendu ${numBlanks}, reçu ${ex.blanks.length}.`;
+// ────────────────────────────────────────────────────────────────────────────
+// Groupes de confusion
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Forme de comparaison : minuscules, apostrophe droite, espaces normalisés. */
+function normalizeWord(w) {
+	return String(w ?? '')
+		.replace(/[’ʼ‘`´]/g, "'")
+		.replace(/\s+/g, ' ')
+		.trim()
+		.toLowerCase();
+}
+
+/**
+ * Groupes d'une règle. Sans groupes valides : un seul groupe = tous les
+ * candidats (comportement historique).
+ */
+function ruleGroups(rule) {
+	const cands = Array.isArray(rule.candidates) ? rule.candidates : [];
+	const groups = Array.isArray(rule.groups)
+		? rule.groups.filter((g) => Array.isArray(g) && g.length >= 2)
+		: [];
+	return groups.length > 0 ? groups : [cands];
+}
+
+function groupIndexOf(groups, word) {
+	const n = normalizeWord(word);
+	return groups.findIndex((g) => g.some((w) => normalizeWord(w) === n));
+}
+
+/** Vérifie la cohérence groupes ↔ candidats (sauvegarde d'une règle). */
+function validateRuleGroups(candidates, groups) {
+	if (groups === null || groups === undefined || (Array.isArray(groups) && groups.length === 0)) {
+		return null;
 	}
-	const candidates = new Set(rule.candidates);
+	if (!Array.isArray(groups)) return 'Les groupes doivent être une liste de listes de mots.';
+	const cands = (Array.isArray(candidates) ? candidates : []).map(normalizeWord);
+	const seen = new Set();
+	for (const g of groups) {
+		if (!Array.isArray(g) || g.length < 2) return 'Chaque groupe doit contenir au moins 2 mots.';
+		for (const w of g) {
+			const n = normalizeWord(w);
+			if (!cands.includes(n)) return `« ${w} » est dans un groupe mais pas dans les candidats.`;
+			if (seen.has(n)) return `« ${w} » apparaît dans plusieurs groupes.`;
+			seen.add(n);
+		}
+	}
+	const missing = cands.filter((c) => !seen.has(c));
+	if (missing.length) return `Candidats sans groupe : ${missing.join(', ')}.`;
+	return null;
+}
+
+/** Groupes réécrits avec la forme exacte des candidats (null si aucun). */
+function canonicalGroups(candidates, groups) {
+	if (!Array.isArray(groups) || groups.length === 0) return null;
+	const byNorm = new Map((candidates || []).map((c) => [normalizeWord(c), c]));
+	return groups.map((g) => g.map((w) => byNorm.get(normalizeWord(w)) || w));
+}
+
+/**
+ * Valide la sortie du LLM et la normalise : retourne { error } ou { blanks }
+ * avec `correct` ramené à la forme exacte du candidat (casse, apostrophe).
+ */
+function validateExercise(ex, rule, numBlanks) {
+	const fail = (error) => ({ error });
+	if (!ex || !ex.text || typeof ex.text !== 'string') return fail('Texte manquant.');
+	if (!Array.isArray(ex.blanks)) return fail('Liste de trous manquante.');
+	if (ex.blanks.length !== numBlanks) {
+		return fail(`Nombre de trous incorrect : attendu ${numBlanks}, reçu ${ex.blanks.length}.`);
+	}
+	const byNorm = new Map(rule.candidates.map((c) => [normalizeWord(c), c]));
+	const groups = ruleGroups(rule);
+	const perGroup = groups.map(() => 0);
 	const positions = new Set();
+	const blanks = [];
 	for (const b of ex.blanks) {
 		if (typeof b.position !== 'number' || b.position < 1 || b.position > numBlanks) {
-			return `Position invalide : ${b.position}.`;
+			return fail(`Position invalide : ${b.position}.`);
 		}
-		if (positions.has(b.position)) return `Position dupliquée : ${b.position}.`;
+		if (positions.has(b.position)) return fail(`Position dupliquée : ${b.position}.`);
 		positions.add(b.position);
-		if (!candidates.has(b.correct)) {
-			return `Bonne réponse hors candidats autorisés : "${b.correct}" (autorisés : ${rule.candidates.join(', ')}).`;
+		const correct = byNorm.get(normalizeWord(b.correct));
+		if (!correct) {
+			return fail(
+				`Bonne réponse hors candidats autorisés : "${b.correct}" (autorisés : ${rule.candidates.join(', ')}).`
+			);
 		}
-		if (!candidates.has(b.distractor)) return `Distracteur hors candidats autorisés : "${b.distractor}".`;
-		if (b.correct === b.distractor) return `correct === distractor à la position ${b.position}.`;
+		const gi = groupIndexOf(groups, correct);
+		if (gi >= 0) perGroup[gi]++;
+		blanks.push({ position: b.position, correct });
 	}
 	for (let i = 1; i <= numBlanks; i++) {
-		if (!ex.text.includes(`{{${i}}}`)) return `Marqueur manquant dans le texte : {{${i}}}.`;
+		if (!ex.text.includes(`{{${i}}}`)) return fail(`Marqueur manquant dans le texte : {{${i}}}.`);
 	}
-	return null;
+	// Plusieurs confusions : chacune doit être travaillée (si assez de trous).
+	if (groups.length > 1 && numBlanks >= groups.length * 2) {
+		const absent = groups.filter((_, i) => perGroup[i] === 0).map((g) => g.join('/'));
+		if (absent.length) return fail(`Confusion(s) sans aucun trou : ${absent.join(', ')}.`);
+	}
+	blanks.sort((x, y) => x.position - y.position);
+	return { blanks };
 }
 
 function formatExamples(rule) {
@@ -242,17 +319,27 @@ function formatExamples(rule) {
 
 function callGenerate(cfg, rule, req, attemptIdx) {
 	const textLength = Math.min(60 + req.num_blanks * 12, 350);
+	const groups = ruleGroups(rule);
+	const multi = groups.length > 1;
+	const groupsBlock = groups.map((g) => `- ${g.map((w) => `« ${w} »`).join(' / ')}`).join('\n');
+	const spreadHint = multi
+		? `\n- Répartis les trous entre les ${groups.length} confusions de façon à peu près équilibrée${
+				req.num_blanks >= groups.length * 2 ? ' (au moins un trou pour CHACUNE)' : ''
+			}, et varie les bonnes réponses à l'intérieur de chaque confusion.`
+		: "\n- Varie les bonnes réponses (pas toujours le même mot).";
 
 	const systemPrompt = `Tu es un professeur de français expérimenté qui crée des exercices à trous pour des élèves de niveau ${req.grade_level}. Ton exigence absolue : chaque trou doit être placé à un endroit où la règle travaillée s'applique vraiment — pas n'importe où dans une phrase. Mieux vaut moins de trous que des trous mal placés.`;
 
 	const retryHint =
 		attemptIdx > 0
-			? "\n\n⚠️ Ta tentative précédente était invalide. Cette fois, vérifie chaque trou : substitue mentalement chacun des candidats autorisés à la place du `{{N}}` — les DEUX versions doivent former des phrases entièrement bien formées (l'une est la bonne réponse, l'autre le distracteur)."
+			? "\n\n⚠️ Ta tentative précédente était invalide. Cette fois, vérifie chaque trou : le mot attendu doit être dans la liste des candidats, chaque marqueur `{{N}}` doit être présent une fois, et les autres mots de la même confusion doivent être des erreurs d'orthographe plausibles (homophones) à cet endroit."
 			: '';
 
 	const userPrompt = `RÈGLE TRAVAILLÉE : ${rule.display_name}
 DESCRIPTION : ${rule.short_description}
 CANDIDATS AUTORISÉS pour les trous : ${JSON.stringify(rule.candidates)}
+${multi ? 'CONFUSIONS' : 'CONFUSION'} TRAVAILLÉE${multi ? 'S' : ''} (pour chaque trou, l'élève choisira parmi les mots de la confusion concernée) :
+${groupsBlock}
 ${formatExamples(rule)}
 
 PROCESSUS À SUIVRE (très important) :
@@ -261,19 +348,18 @@ PROCESSUS À SUIVRE (très important) :
 
 ÉTAPE 2 — Identifie les positions où l'un des candidats ${JSON.stringify(rule.candidates)} apparaît NATURELLEMENT dans ton récit. Tu dois trouver exactement ${req.num_blanks} positions. Si tu n'en trouves pas autant naturellement, RÉÉCRIS le récit pour en ajouter — n'invente PAS des positions artificielles.
 
-ÉTAPE 3 — Remplace ces positions par \`{{1}}\`, \`{{2}}\`, …, \`{{${req.num_blanks}}}\` dans l'ordre. Pour chaque trou, fournis la bonne réponse (le candidat qui était là dans ton récit) et le distracteur (l'autre candidat).
+ÉTAPE 3 — Remplace ces positions par \`{{1}}\`, \`{{2}}\`, …, \`{{${req.num_blanks}}}\` dans l'ordre. Pour chaque trou, fournis la bonne réponse (le candidat qui était là dans ton récit). Le marqueur remplace le mot ENTIER, apostrophe comprise (ex. « Elle {{3}} levée » pour « s'est »).
 
-ÉTAPE 4 — Self-check OBLIGATOIRE : pour chaque trou, vérifie que substituer CHACUN des candidats produit une phrase grammaticalement complète. Si l'un des deux candidats donne une phrase agrammaticale, le trou est mal placé — supprime-le.
+ÉTAPE 4 — Self-check OBLIGATOIRE : pour chaque trou, le mot attendu doit être le seul correct, et les autres mots de sa confusion doivent être des erreurs que l'élève pourrait réellement faire (ils se prononcent pareil). Si aucun mot de la confusion n'est la réponse naturelle à cet endroit, le trou est mal placé — supprime-le.
 
 EXEMPLES DE TROUS MAL PLACÉS (à ÉVITER absolument) :
-- "Il arrive {{?}} la gare." → MAUVAIS : on a besoin de "à la gare", ni "ou" ni "où" ne s'insère ici.
-- "Elle pense {{?}} ses vacances." → MAUVAIS : on a besoin de "à ses vacances".
-- Toute phrase où ni l'un ni l'autre des candidats ne forme une phrase correcte est INTERDITE.
+- "Il arrive {{?}} la gare." pour ou/où → MAUVAIS : on a besoin de "à la gare", ni "ou" ni "où" ne s'insère ici.
+- Toute phrase où aucun des mots de la confusion ne forme une phrase correcte est INTERDITE.
 
 CONTRAINTES DE FORME :
 - Texte narratif d'environ ${textLength} mots, vocabulaire et longueur de phrases adaptés au niveau ${req.grade_level}.
 - Marqueurs \`{{N}}\` numérotés dans l'ordre d'apparition (1-based, jusqu'à ${req.num_blanks}).
-- Chaque trou : indique correct + distractor (les deux dans ${JSON.stringify(rule.candidates)}).${retryHint}
+- \`correct\` est écrit exactement comme dans la liste des candidats, en minuscules même en début de phrase (l'affichage ajoute la majuscule).${spreadHint}${retryHint}
 
 Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 
@@ -295,11 +381,10 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 							type: 'array',
 							items: {
 								type: 'object',
-								required: ['position', 'correct', 'distractor'],
+								required: ['position', 'correct'],
 								properties: {
 									position: { type: 'integer', minimum: 1, maximum: req.num_blanks },
-									correct: { type: 'string', enum: rule.candidates },
-									distractor: { type: 'string', enum: rule.candidates }
+									correct: { type: 'string', enum: rule.candidates }
 								}
 							}
 						}
@@ -334,19 +419,30 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 	}
 }
 
-function grade(exercise, responses) {
-	// On ne note que les trous pour lesquels une réponse a été fournie (permet
-	// la "version courte" d'un exercice).
+/**
+ * Note les trous répondus (permet la "version courte" d'un exercice).
+ * `rule` (optionnel) : { candidates, groups } pour le détail par confusion.
+ */
+function grade(exercise, responses, rule) {
 	const attempted = exercise.blanks.filter((b) =>
 		Object.prototype.hasOwnProperty.call(responses, String(b.position))
 	);
+	const groups = rule ? ruleGroups(rule) : null;
 	const per_blank = [];
+	const per_group = {};
 	let score = 0;
 	for (const b of attempted) {
 		const given = responses[String(b.position)] ?? null;
-		const ok = given === b.correct;
+		const ok = given !== null && normalizeWord(given) === normalizeWord(b.correct);
 		if (ok) score++;
 		per_blank.push({ position: b.position, given, correct: b.correct, ok });
+		if (groups && groups.length > 1) {
+			const gi = groupIndexOf(groups, b.correct);
+			const label = gi >= 0 ? groups[gi].join(' / ') : b.correct;
+			per_group[label] = per_group[label] || { ok: 0, total: 0 };
+			per_group[label].total++;
+			if (ok) per_group[label].ok++;
+		}
 	}
 	const total = attempted.length;
 	const ratio = total > 0 ? score / total : 0;
@@ -355,6 +451,7 @@ function grade(exercise, responses) {
 		score_total: total,
 		per_blank,
 		per_rule_breakdown: { [exercise.rule]: { ok: score, total } },
+		per_group_breakdown: per_group,
 		suggested_next_rule_id: ratio < 0.8 ? exercise.rule : null
 	};
 }
@@ -367,6 +464,11 @@ function generateAppreciation(cfg, exercise, rule, grading) {
 	else if (ratio >= 0.5) toneHint = 'Score moyen — encourage et donne une astuce courte sur la règle.';
 	else toneHint = 'Score faible — rassure, propose une astuce simple et concrète sur la règle.';
 
+	const weakGroups = Object.entries(grading.per_group_breakdown || {})
+		.filter(([, v]) => v.ok < v.total)
+		.map(([label, v]) => `${label} (${v.ok}/${v.total})`)
+		.join(', ');
+
 	const errorsList = grading.per_blank
 		.filter((b) => !b.ok)
 		.map((b) => `position ${b.position} : a écrit "${b.given ?? '(rien)'}" au lieu de "${b.correct}"`)
@@ -376,7 +478,7 @@ function generateAppreciation(cfg, exercise, rule, grading) {
 	const userPrompt = `Tu donnes un retour personnalisé à un élève de ${exercise.grade_level} qui vient de faire un exercice à trous sur la règle "${rule.display_name}" (${rule.short_description}).
 
 Score : ${grading.score}/${grading.score_total}.
-${errorsList ? `Erreurs : ${errorsList}.` : 'Aucune erreur.'}
+${errorsList ? `Erreurs : ${errorsList}.` : 'Aucune erreur.'}${weakGroups ? `\nConfusions à retravailler : ${weakGroups}. Centre ton astuce sur la plus ratée.` : ''}
 Ton attendu : ${toneHint}
 
 Écris UNE SEULE appréciation courte (3-5 phrases maximum), en français, ton bienveillant et encourageant. Tutoie l'élève. Si pertinent, glisse une astuce mémo pour la règle (ex : « où prend un accent quand il indique un lieu ; ou ne sert qu'à donner le choix »). Pas de formule mécanique, sois naturel. Réponds uniquement avec l'appréciation, sans préambule.`;
@@ -428,6 +530,10 @@ module.exports = {
 	llmConfig,
 	validateGenerateRequest,
 	validateExercise,
+	normalizeWord,
+	ruleGroups,
+	validateRuleGroups,
+	canonicalGroups,
 	callGenerate,
 	grade,
 	generateAppreciation,

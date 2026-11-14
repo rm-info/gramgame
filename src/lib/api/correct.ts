@@ -3,6 +3,7 @@ import { callGram } from './_helpers';
 export interface CorrectInput {
 	exercise_id: string;
 	responses: Record<string, string>;
+	hard_mode?: boolean;
 }
 
 export interface PerBlank {
@@ -17,6 +18,9 @@ export interface CorrectionResult {
 	score_total: number;
 	per_blank: PerBlank[];
 	per_rule_breakdown: Record<string, { ok: number; total: number }>;
+	/** Détail par groupe de confusion (vide si la règle n'a qu'un groupe). */
+	per_group_breakdown?: Record<string, { ok: number; total: number }>;
+	hard_mode?: boolean;
 	appreciation: string;
 	suggested_next_rule_id: string | null;
 }

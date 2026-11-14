@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { capitalizeFirst } from '$lib/confusion';
+
 	interface Props {
 		position: number;
 		options: string[];
@@ -6,6 +8,8 @@
 		readonly?: boolean;
 		state?: 'neutral' | 'correct' | 'incorrect';
 		correct?: string;
+		/** Trou en début de phrase : on affiche les mots avec une majuscule. */
+		capitalize?: boolean;
 	}
 
 	let {
@@ -14,23 +18,27 @@
 		value = $bindable(),
 		readonly = false,
 		state = 'neutral',
-		correct = ''
+		correct = '',
+		capitalize = false
 	}: Props = $props();
+
+	const label = (w: string | null | undefined) =>
+		w ? (capitalize ? capitalizeFirst(w) : w) : '—';
 
 	const selectId = $derived(`blank-${position}`);
 </script>
 
 <span class="blank {state}" data-position={position}>
 	{#if readonly}
-		<span class="readonly-value">{value ?? '—'}</span>
+		<span class="readonly-value">{label(value)}</span>
 		{#if state === 'incorrect' && correct}
-			<span class="correct-hint">→ {correct}</span>
+			<span class="correct-hint">→ {label(correct)}</span>
 		{/if}
 	{:else}
 		<select id={selectId} bind:value aria-label={`Trou numéro ${position}`}>
 			<option value={null}>—</option>
 			{#each options as opt (opt)}
-				<option value={opt}>{opt}</option>
+				<option value={opt}>{label(opt)}</option>
 			{/each}
 		</select>
 	{/if}
