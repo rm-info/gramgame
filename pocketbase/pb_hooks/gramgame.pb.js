@@ -70,6 +70,35 @@ onMailerRecordOTPSend((e) => {
 }, 'users');
 
 // ────────────────────────────────────────────────────────────────────────────
+// Anti brute-force des codes : plafond d'échecs par compte (cf. lib/gram.js).
+// ────────────────────────────────────────────────────────────────────────────
+routerUse((e) => {
+	if (
+		e.request.method !== 'POST' ||
+		!/^\/api\/collections\/(users|_pb_users_auth_)\/auth-with-otp\/?$/.test(e.request.url.path)
+	) {
+		return e.next();
+	}
+
+	const g = require(`${__hooks}/lib/gram.js`);
+	let userId = '';
+	try {
+		userId = e.app.findOTPById(String(g.readJsonBody(e).otpId || '')).getString('recordRef');
+	} catch (_) {}
+
+	if (userId && g.isAccountLocked(e.app, userId)) {
+		throw new TooManyRequestsError('Trop de codes erronés sur ce compte. Réessaie dans une heure.');
+	}
+
+	try {
+		e.next();
+	} catch (err) {
+		if (userId) g.recordOtpFailure(e.app, userId);
+		throw err;
+	}
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // Inscription
 // ────────────────────────────────────────────────────────────────────────────
 routerAdd('POST', '/api/gram/register', (e) => {

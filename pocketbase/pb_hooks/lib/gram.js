@@ -83,6 +83,20 @@ function sendOtp(app, user) {
 		}
 	}
 
+	if (isAccountLocked(app, user.id)) {
+		return {
+			status: 429,
+			error: 'Trop de codes erronés sur ce compte. Réessaie dans une heure.'
+		};
+	}
+
+	// Un seul code valide à la fois : les précédents sont invalidés.
+	for (const o of existing) {
+		try {
+			app.delete(o);
+		} catch (_) {}
+	}
+
 	const length = collection.otp.length || 6;
 	const password = $security.randomStringWithAlphabet(length, '0123456789');
 
@@ -107,6 +121,35 @@ function sendOtp(app, user) {
 	}
 
 	return { otpId: otp.id };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Anti brute-force des codes (compteur en mémoire, remis à zéro au restart)
+//
+// PocketBase limite déjà nativement à 5 essais par compte et par 3 min
+// (≈ 2400 essais/jour sur un compte ciblé). On ajoute un plafond de 10 échecs
+// par compte et par heure glissante : au-delà, plus de code envoyé ni accepté
+// pendant une heure. PocketBase valide le code AVANT les hooks
+// onRecordAuthWithOTPRequest : le comptage se fait dans un middleware sur la
+// route auth-with-otp (pb_hooks/gramgame.pb.js).
+// ────────────────────────────────────────────────────────────────────────────
+
+const OTP_MAX_FAILS_PER_ACCOUNT = 10;
+const OTP_ACCOUNT_WINDOW_MS = 60 * 60 * 1000;
+
+function accountFails(app, userId) {
+	const now = Date.now();
+	return (app.store().get(`otpfail:${userId}`) || []).filter((t) => now - t < OTP_ACCOUNT_WINDOW_MS);
+}
+
+function isAccountLocked(app, userId) {
+	return accountFails(app, userId).length >= OTP_MAX_FAILS_PER_ACCOUNT;
+}
+
+function recordOtpFailure(app, userId) {
+	const list = accountFails(app, userId);
+	list.push(Date.now());
+	app.store().set(`otpfail:${userId}`, list);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -379,6 +422,8 @@ module.exports = {
 	findUserByUsername,
 	readJsonBody,
 	sendOtp,
+	isAccountLocked,
+	recordOtpFailure,
 	llmConfig,
 	validateGenerateRequest,
 	validateExercise,

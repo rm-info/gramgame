@@ -141,7 +141,7 @@ Le front est une **SPA pure** (`ssr = false`, `prerender = false`) : le build ne
 ## Modèle d'authentification
 
 - **Inscription** : nom d'utilisateur (3-20 caractères, lettres/chiffres/-/_) + email. Un code à 6 chiffres est envoyé par mail.
-- **Connexion** : nom d'utilisateur seul → code par mail (valable 15 min, 1 envoi/minute max, 5 essais max par code).
+- **Connexion** : nom d'utilisateur seul → code par mail (valable 15 min, 1 envoi/minute max, un nouveau code invalide le précédent). Anti brute-force : 5 essais par compte toutes les 3 min (natif PocketBase), et compte bloqué 1 h après 10 codes erronés (`pb_hooks`, compteur en mémoire).
 - **Plusieurs apprenants dans une famille** : un même email peut servir pour plusieurs noms d'utilisateur (ex. « lea » et « tom » avec `parent@gmail.com`). Les codes arrivent tous dans la même boîte, chaque compte a sa progression. Une fois plusieurs comptes connectés sur un navigateur, le sélecteur en haut permet de basculer **sans redemander de code** (« + Ajouter un compte… » pour en connecter un autre).
 
 **Technique** : 1 nom d'utilisateur = 1 enregistrement de la collection auth `users`. PocketBase exige un `email` unique : il reçoit une adresse synthétique non routable (`<username>@users.gramgame.invalid`) et l'adresse réelle est dans `real_email` ; le hook `onMailerRecordOTPSend` redirige les codes vers elle. Aucun `+tag` dans les adresses, donc compatible avec tous les fournisseurs mail. Le front garde un token par compte connecté (localStorage).
