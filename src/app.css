@@ -141,3 +141,59 @@ h3 {
 .stack > * + * {
 	margin-top: var(--space-4);
 }
+
+/* Tableaux d'admin : sur téléphone, une fiche par ligne (libellé : valeur)
+	 au lieu de colonnes qui débordent. Chaque <td> porte data-label. Classe doublée pour passer devant
+	 les styles scopés des pages (.ex-table td.svelte-xxx). */
+@media (max-width: 640px) {
+	table.stack-table.stack-table,
+	table.stack-table.stack-table tbody,
+	table.stack-table.stack-table tr,
+	table.stack-table.stack-table td {
+		display: block;
+		width: 100%;
+	}
+	table.stack-table.stack-table thead {
+		display: none;
+	}
+	table.stack-table.stack-table tr {
+		padding: var(--space-2) 0;
+		border-bottom: 1px solid var(--color-border);
+	}
+	table.stack-table.stack-table tbody tr:last-child {
+		border-bottom: none;
+	}
+	table.stack-table.stack-table td {
+		display: flex;
+		align-items: baseline;
+		gap: 0 var(--space-2);
+		padding: 4px 0;
+		border: none;
+		overflow-wrap: anywhere;
+		white-space: normal;
+	}
+	table.stack-table.stack-table td > * {
+		min-width: 0;
+	}
+	table.stack-table.stack-table td > input,
+	table.stack-table.stack-table td > select {
+		flex: 1 1 auto;
+		width: auto;
+	}
+	table.stack-table.stack-table td::before {
+		content: attr(data-label);
+		flex: 0 0 7.5rem;
+		font-size: 0.8rem;
+		text-transform: uppercase;
+		color: var(--color-text-muted);
+	}
+	table.stack-table.stack-table td[data-label=""]::before,
+	table.stack-table.stack-table td:not([data-label])::before {
+		content: none;
+	}
+	table.stack-table.stack-table td:not([data-label]),
+	table.stack-table.stack-table td[data-label=""] {
+		display: block;
+		padding-top: var(--space-2);
+	}
+}

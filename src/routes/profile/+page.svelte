@@ -78,7 +78,6 @@
 			<dt>Email</dt>
 			<dd>
 				{auth.user?.real_email ?? '—'}
-				<span class="muted note">(changement d'email à venir)</span>
 			</dd>
 
 			<dt>Rôle</dt>

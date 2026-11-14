@@ -307,7 +307,7 @@
 							correction (ex. <code>étiquette, étiquète</code> pour accepter l'orthographe
 							rectifiée).
 						</p>
-						<table class="blanks-table">
+						<table class="blanks-table stack-table">
 							<thead>
 								<tr>
 									<th>Trou</th>
@@ -320,17 +320,17 @@
 							<tbody>
 								{#each editBlanks as b (b.position)}
 									<tr>
-										<td><code>{`{{${b.position}}}`}</code></td>
-										<td><input type="text" class="cell-input" bind:value={b.verb} /></td>
-										<td>
+										<td data-label="Trou"><code>{`{{${b.position}}}`}</code></td>
+										<td data-label="Verbe"><input type="text" class="cell-input" bind:value={b.verb} /></td>
+										<td data-label="Personne">
 											<select bind:value={b.person}>
 												{#each Object.entries(PERSON_LABELS) as [code, label] (code)}
 													<option value={code}>{label}</option>
 												{/each}
 											</select>
 										</td>
-										<td><input type="text" class="cell-input wide" bind:value={b.accepted_text} /></td>
-										<td class="actions">
+										<td data-label="Réponses"><input type="text" class="cell-input wide" bind:value={b.accepted_text} /></td>
+										<td data-label="" class="actions">
 											<button
 												type="button"
 												class="link danger"
@@ -444,7 +444,7 @@
 	}
 	.editor-grid {
 		display: grid;
-		grid-template-columns: 1fr;
+		grid-template-columns: minmax(0, 1fr);
 		gap: var(--space-4);
 	}
 	@media (min-width: 900px) {
@@ -455,7 +455,7 @@
 			max-width: min(1400px, calc(100vw - 2 * var(--space-4)));
 		}
 		.editor-grid {
-			grid-template-columns: 1fr 1fr;
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 			align-items: stretch;
 		}
 		.editor-pane {

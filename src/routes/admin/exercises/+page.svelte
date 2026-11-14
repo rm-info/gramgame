@@ -127,7 +127,7 @@
 					: 'Aucun exercice ne correspond aux filtres.'}
 			</p>
 		{:else}
-			<table class="ex-table">
+			<table class="ex-table stack-table">
 				<thead>
 					<tr>
 						<th>Vérifié</th>
@@ -144,7 +144,7 @@
 				<tbody>
 					{#each filtered as ex (ex.id)}
 						<tr>
-							<td>
+							<td data-label="Vérifié">
 								{#if ex.verified}
 									<span
 										class="verified-pill"
@@ -158,14 +158,14 @@
 									<span class="muted small">—</span>
 								{/if}
 							</td>
-							<td><strong>{ex.rule?.display_name ?? ex.rule_id}</strong></td>
-							<td>{ex.theme}</td>
-							<td class="muted">{ex.grade_level}</td>
-							<td class="muted">{ex.num_blanks}</td>
-							<td class="muted">{ex.created_by_username}</td>
-							<td class="muted small">{ex.llm_model}</td>
-							<td class="muted small">{formatDate(ex.created_at)}</td>
-							<td class="actions">
+							<td data-label="Règle"><strong>{ex.rule?.display_name ?? ex.rule_id}</strong></td>
+							<td data-label="Thème">{ex.theme}</td>
+							<td data-label="Niveau" class="muted">{ex.grade_level}</td>
+							<td data-label="Trous" class="muted">{ex.num_blanks}</td>
+							<td data-label="Auteur" class="muted">{ex.created_by_username}</td>
+							<td data-label="Modèle" class="muted small">{ex.llm_model}</td>
+							<td data-label="Date" class="muted small">{formatDate(ex.created_at)}</td>
+							<td data-label="" class="actions">
 								<a href={`${base}/exercise/${ex.id}/edit`} class="edit-btn">Éditer</a>
 								<button
 									type="button"
