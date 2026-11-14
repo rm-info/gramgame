@@ -171,9 +171,20 @@ Une règle = un `id` (ex. `son-sont`), un nom affiché, une description, une cat
 | `qcm` | une question par phrase (ou par verbe), boutons de réponse, explication après correction | liste fixe (groupes des verbes, sans LLM) ou LLM **vérifié par des règles** (passé/futur proche, pronom) |
 
 La configuration (`config`, JSON) d'une règle `free_text` / `qcm` choisit le générateur :
-- `{"generator": "verb_groups"}` : verbes tirés d'une liste fermée, groupe connu d'avance, avec les pièges (aller, -ir du 3e groupe, -oir, -re). « être » et « avoir » ne sont pas proposés (auxiliaires, hors groupe selon les manuels).
+- `{"generator": "verb_groups"}` : verbes tirés d'une liste fermée, groupe connu d'avance, avec les pièges (aller, -ir du 3e groupe, -oir, -re). « être » et « avoir » ne sont pas proposés (auxiliaires, hors groupe selon les manuels). À partir du CM2, une partie des verbes est présentée **conjuguée dans une phrase** (« Ils [[partent]] en vacances. ») : phrases construites sans IA à partir d'un complément écrit à la main pour chaque verbe (`GROUP_SENTENCES`).
 - `{"generator": "llm_qcm", "check": "proche" | "pronom", "highlight": true, "balance": true}` : phrases écrites par le LLM, passage clé entre `[[ ]]`. `check: proche` reclasse chaque phrase (venir de / aller + infinitif, sinon présent) et rejette l'exercice si le LLM s'est trompé ; `check: pronom` contrôle nombre, genre évident (la/le/une/un…), moi → nous, toi → vous.
 - `{"generator": "conj_present", "pool": "present" | "eter_eler" | "accord"}` : texte à trous de conjugaison au présent. Le pronom sujet collé au trou est contrôlé (« nous {{3}} » doit être à la 1re du pluriel). Les orthographes rectifiées (1990) sont acceptées en variante (« il étiquète », « il connait ») et signalées « rectifiée » à la correction.
+
+**Niveau de l'élève** : pour `verb_groups` et `conj_present`, chaque verbe a une difficulté (1 courant / 2 pièges classiques / 3 rare ou difficile, dans `pb_hooks/lib/conjugaison.js`). Le niveau choisi donne un palier qui règle le mélange :
+
+| Niveau | Verbes tirés | Groupes : verbes conjugués en phrase | Accord sujet-verbe |
+|---|---|---|---|
+| CP – CE2 | faciles uniquement | 0 % | sujets simples juste avant le verbe, 3e personne seulement |
+| CM1 | ⅖ faciles, ⅗ moyens | 0 % | sujets éloignés, compléments du nom, sujets composés, pronom complément |
+| CM2 – 6e | ⅖ faciles, ⅗ moyens | 40 % | idem |
+| 5e et + | ⅕ faciles, ⅖ moyens, ⅖ difficiles | 60 % | + sujet inversé, proposition intercalée, « qui », « toi et moi » |
+
+Pour les exercices écrits par l'IA, le niveau règle aussi la longueur du texte et le vocabulaire.
 
 Pour tous les types, la correction détaille le score par catégorie (confusion, groupe du verbe, accent grave / consonne doublée, sujet singulier / pluriel…), et l'appréciation de l'IA cible la catégorie la plus ratée.
 

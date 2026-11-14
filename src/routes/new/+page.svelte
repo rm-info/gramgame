@@ -241,6 +241,14 @@
 						<option value={level}>{level}</option>
 					{/each}
 				</select>
+				{#if selectedRule?.config?.generator === 'verb_groups' || selectedRule?.config?.generator === 'conj_present'}
+					<p class="muted rule-desc">
+						Le niveau règle aussi la difficulté des verbes proposés{selectedRule?.config
+							?.generator === 'verb_groups'
+							? ' (et, à partir du CM2, une partie est conjuguée dans une phrase)'
+							: ''}.
+					</p>
+				{/if}
 			</div>
 
 			<div>

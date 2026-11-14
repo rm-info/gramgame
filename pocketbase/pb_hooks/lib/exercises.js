@@ -48,6 +48,21 @@ function spread(n, weights) {
 	return counts;
 }
 
+/**
+ * Tire n verbes d'un réservoir { difficulté: [verbes] } selon le palier du
+ * niveau scolaire (mélange de difficultés défini dans conj.TIER_MIX).
+ */
+function drawLeveled(poolByDiff, n, tier) {
+	const mix = conj.TIER_MIX[tier] || conj.TIER_MIX[2];
+	const weights = {};
+	for (const d of Object.keys(mix)) if (poolByDiff[d] && poolByDiff[d].length) weights[d] = mix[d];
+	if (!Object.keys(weights).length) weights[Object.keys(poolByDiff)[0]] = 1;
+	const counts = spread(n, weights);
+	let out = [];
+	for (const d of Object.keys(counts)) out = out.concat(drawN(poolByDiff[d], counts[d]));
+	return out;
+}
+
 function config(rule) {
 	return rule.config && typeof rule.config === 'object' ? rule.config : {};
 }
@@ -71,41 +86,111 @@ const GROUP_LABELS = { 1: '1er groupe', 2: '2e groupe', 3: '3e groupe' };
 
 function groupExplanation(verb, group) {
 	if (group === 1) return `« ${verb} » se termine par -er : 1er groupe.`;
+	const refl = /^(s'|se )/.test(verb) ? 'nous ' : '';
 	const nous = conj.conjugatePerson(verb, '1p');
-	if (group === 2) return `« ${verb} » se termine par -ir et fait « nous ${nous[0]} » : 2e groupe.`;
+	if (group === 2) return `« ${verb} » se termine par -ir et fait « nous ${refl}${nous[0]} » : 2e groupe.`;
 	if (verb === 'aller') return '« aller » se termine par -er, mais c\'est l\'exception : 3e groupe.';
 	if (verb.endsWith('ir') && !verb.endsWith('oir')) {
-		return `« ${verb} » se termine par -ir mais fait « nous ${nous[0]} » (pas de -issons) : 3e groupe.`;
+		return `« ${verb} » se termine par -ir mais fait « nous ${refl}${nous[0]} » (pas de -issons) : 3e groupe.`;
 	}
 	const ending = verb.endsWith('oir') ? '-oir' : verb.endsWith('re') ? '-re' : `-${verb.slice(-2)}`;
 	return `« ${verb} » se termine par ${ending} : 3e groupe.`;
 }
 
-function generateVerbGroups(numItems) {
+const SUBJECTS = { '1s': ['je'], '2s': ['tu'], '3s': ['il', 'elle', 'on'], '1p': ['nous'], '2p': ['vous'], '3p': ['ils', 'elles'] };
+const REFLEXIVE = { '1s': 'me', '2s': 'te', '3s': 'se', '1p': 'nous', '2p': 'vous', '3p': 'se' };
+const startsWithVowel = (w) => /^[aeiouyéèêëàâîïôûœ]/i.test(w);
+
+function pickOne(arr) {
+	return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/** « je » + « me/te/se » élidés devant une voyelle (pas devant h : haïr, h aspiré). */
+function joinElided(word, next) {
+	return (word === 'je' || word === 'me' || word === 'te' || word === 'se') && startsWithVowel(next)
+		? `${word.slice(0, -1)}'`
+		: `${word} `;
+}
+
+/**
+ * Phrase sans IA : sujet + [[forme conjuguée]] + complément écrit à la main
+ * (conj.GROUP_SENTENCES). Retourne { sentence, form } ou null.
+ */
+function buildGroupSentence(verb, person) {
+	const entry = conj.GROUP_SENTENCES[verb];
+	if (!entry) return null;
+	const comp = typeof entry === 'string' ? entry : entry.c;
+	const forms = conj.conjugatePerson(verb, person);
+	if (!forms) return null;
+	const form = forms[0];
+	// Verbes à sujet inanimé (mûrir, fleurir…) : « il / elle », pas « on ».
+	const restricted = typeof entry === 'object' && Array.isArray(entry.p);
+	const subject = pickOne(SUBJECTS[person].filter((x) => !(restricted && x === 'on')));
+	let s = '';
+	if (/^(s'|se )/.test(verb)) {
+		// « je m'assieds », « il s'évanouit », « nous nous asseyons »
+		const refl = REFLEXIVE[person];
+		s = joinElided(subject, refl) + joinElided(refl, form);
+	} else {
+		s = joinElided(subject, form);
+	}
+	const sentence = `${s}[[${form}]] ${comp}.`;
+	return { sentence: sentence.charAt(0).toUpperCase() + sentence.slice(1), form };
+}
+
+function allowedPersons(verb) {
+	const entry = conj.GROUP_SENTENCES[verb];
+	return entry && typeof entry === 'object' && Array.isArray(entry.p) ? entry.p : conj.PERSONS;
+}
+
+function generateVerbGroups(numItems, grade) {
 	const pools = conj.POOLS.groups;
-	// À peu près un tiers par groupe ; le 3e groupe contient les pièges.
+	const tier = conj.levelTier(grade);
+	// À peu près un tiers par groupe ; difficulté des verbes selon le niveau.
 	const counts = spread(numItems, { 1: 1, 2: 1, 3: 1 });
 	let verbs = [];
 	for (const k of Object.keys(counts)) {
-		verbs = verbs.concat(drawN(pools[k], counts[k]).map((v) => ({ verb: v, group: Number(k) })));
+		verbs = verbs.concat(drawLeveled(pools[k], counts[k], tier).map((v) => ({ verb: v, group: Number(k) })));
 	}
-	// « aller » est LE piège : on le met souvent s'il y a de la place.
+	// « aller » est LE piège (dès le CE2) : on le met souvent s'il y a de la place.
 	if (numItems >= 6 && !verbs.some((v) => v.verb === 'aller') && Math.random() < 0.6) {
 		const i = verbs.findIndex((v) => v.group === 3);
 		if (i >= 0) verbs[i] = { verb: 'aller', group: 3 };
 	}
 	verbs = shuffle(verbs);
-	return {
-		text: 'Pour chaque verbe, indique son groupe.',
-		theme: 'Liste de verbes',
-		llm_model: 'aucun (liste de verbes)',
-		blanks: verbs.map((v, i) => ({
+
+	// À partir du CM2 : une partie des verbes est conjuguée dans une phrase,
+	// l'élève doit d'abord retrouver l'infinitif.
+	const nConj = Math.round(numItems * conj.conjugatedShare(grade));
+	const conjIdx = new Set(shuffle(verbs.map((_, i) => i)).slice(0, nConj));
+
+	const blanks = verbs.map((v, i) => {
+		const base = {
 			position: i + 1,
 			prompt: v.verb,
 			correct: GROUP_LABELS[v.group],
 			explanation: groupExplanation(v.verb, v.group),
 			category: GROUP_LABELS[v.group]
-		}))
+		};
+		if (!conjIdx.has(i)) return base;
+		const built = buildGroupSentence(v.verb, pickOne(allowedPersons(v.verb)));
+		if (!built) return base;
+		return {
+			...base,
+			prompt: built.sentence,
+			verb: v.verb,
+			explanation: `« ${built.form} » vient du verbe « ${v.verb} ». ${base.explanation}`
+		};
+	});
+
+	return {
+		text:
+			nConj > 0
+				? "Pour chaque verbe, indique son groupe. Quand le verbe est conjugué dans une phrase, retrouve d'abord son infinitif."
+				: 'Pour chaque verbe, indique son groupe.',
+		theme: 'Liste de verbes',
+		llm_model: 'aucun (liste de verbes)',
+		blanks
 	};
 }
 
@@ -367,9 +452,10 @@ function presentCategory(verb) {
 	return grp === 0 ? 'être / avoir' : GROUP_LABELS[grp];
 }
 
-/** Verbes + personnes imposés par le serveur pour chaque trou. */
-function pickConjAssignments(rule, n) {
+/** Verbes + personnes imposés par le serveur pour chaque trou (selon le niveau). */
+function pickConjAssignments(rule, n, grade) {
 	const c = config(rule);
+	const tier = conj.levelTier(grade);
 	const persons = (weights) => {
 		const counts = spread(n, weights);
 		let list = [];
@@ -380,7 +466,7 @@ function pickConjAssignments(rule, n) {
 	if (c.pool === 'eter_eler') {
 		const pool = conj.POOLS.eter_eler;
 		const half = Math.ceil(n / 2);
-		const verbs = shuffle(drawN(pool.double, half).concat(drawN(pool.grave, n - half)));
+		const verbs = shuffle(drawLeveled(pool.double, half, tier).concat(drawLeveled(pool.grave, n - half, tier)));
 		// Surtout des personnes où le verbe change (e muet), quelques nous/vous en piège.
 		const ps = persons({ '1s': 2, '2s': 2, '3s': 3, '3p': 3, '1p': 1, '2p': 1 });
 		return verbs.map((verb, i) => ({ verb, person: ps[i], category: eterElerCategory(verb, ps[i]) }));
@@ -390,11 +476,12 @@ function pickConjAssignments(rule, n) {
 	const pool = conj.POOLS[poolName];
 	const counts = spread(n, { 1: 4, 2: 2, 3: 4 });
 	let verbs = [];
-	for (const k of Object.keys(counts)) verbs = verbs.concat(drawN(pool[k], counts[k]));
+	for (const k of Object.keys(counts)) verbs = verbs.concat(drawLeveled(pool[k], counts[k], tier));
 	verbs = shuffle(verbs);
 
 	if (poolName === 'accord') {
-		const ps = persons({ '3s': 9, '3p': 9, '1p': 1, '2p': 1 });
+		// Petits niveaux : seulement singulier / pluriel à la 3e personne.
+		const ps = persons(tier === 1 ? { '3s': 1, '3p': 1 } : { '3s': 9, '3p': 9, '1p': 1, '2p': 1 });
 		return verbs.map((verb, i) => ({
 			verb,
 			person: ps[i],
@@ -404,6 +491,23 @@ function pickConjAssignments(rule, n) {
 	const ps = persons({ '1s': 1, '2s': 1, '3s': 1, '1p': 1, '2p': 1, '3p': 1 });
 	return verbs.map((verb, i) => ({ verb, person: ps[i], category: presentCategory(verb) }));
 }
+
+// Pièges d'accord demandés au LLM, selon le palier du niveau.
+const ACCORD_FOCUS = {
+	1: `\nOBJECTIF : travailler l'ACCORD SUJET-VERBE, niveau débutant. Sujets SIMPLES : un groupe nominal court (« le chat », « les enfants », « ma sœur ») ou deux prénoms (« Léa et Tom »), placé JUSTE AVANT le verbe. Pas de sujet inversé, pas de pronom complément entre le sujet et le verbe.`,
+	2: `\nOBJECTIF : travailler l'ACCORD SUJET-VERBE. Pour les sujets au singulier ou au pluriel, utilise surtout des GROUPES NOMINAUX (pas des pronoms) et varie les pièges :
+- sujet éloigné du verbe (« Les enfants de la classe de CM2 {{1}} … ») ;
+- nom complément au nombre différent du sujet (« Le chien des voisins {{2}} … ») ;
+- sujet composé (« Léa et Tom {{3}} … ») ;
+- pronom complément entre le sujet et le verbe (« Les oiseaux les {{4}} … »).`,
+	3: `\nOBJECTIF : travailler l'ACCORD SUJET-VERBE, niveau avancé. Utilise surtout des GROUPES NOMINAUX et multiplie les pièges :
+- sujet éloigné du verbe, avec une proposition intercalée (« Les élèves, que la directrice félicite chaque année, {{1}} … ») ;
+- nom complément au nombre différent du sujet (« Le bruit des vagues {{2}} … ») ;
+- sujet inversé (« Dans la cour {{3}} les élèves. ») ;
+- sujet composé, y compris de personnes différentes (« Toi et moi {{4}} … » → nous) ;
+- pronom relatif sujet (« les fleurs qui {{5}} … ») ;
+- pronom complément entre le sujet et le verbe (« Les oiseaux les {{6}} … »).`
+};
 
 const PERSON_HINT = {
 	'1s': '1re personne du singulier (je / j\')',
@@ -419,15 +523,7 @@ function callConj(cfg, rule, req, assignments, attemptIdx) {
 	const n = assignments.length;
 	const textLength = Math.min(60 + n * 14, 380);
 	const list = assignments.map((a, i) => `{{${i + 1}}} : « ${a.verb} », ${PERSON_HINT[a.person]}`).join('\n');
-	const focus =
-		c.focus === 'accord'
-			? `\nOBJECTIF : travailler l'ACCORD SUJET-VERBE. Pour les sujets au singulier ou au pluriel, utilise surtout des GROUPES NOMINAUX (pas des pronoms) et varie les pièges :
-- sujet éloigné du verbe (« Les enfants de la classe de CM2 {{1}} … ») ;
-- nom complément au nombre différent du sujet (« Le chien des voisins {{2}} … ») ;
-- sujet inversé (« Dans la cour {{3}} les élèves. ») ;
-- sujet composé (« Léa et Tom {{4}} … ») ;
-- pronom complément entre le sujet et le verbe (« Les oiseaux les {{5}} … »).`
-			: '';
+	const focus = c.focus === 'accord' ? ACCORD_FOCUS[conj.levelTier(req.grade_level)] || ACCORD_FOCUS[2] : '';
 	const retryHint =
 		attemptIdx > 0
 			? "\n\n⚠️ Ta tentative précédente était invalide : vérifie que chaque marqueur est présent une seule fois, que chaque trou utilise le verbe et la personne imposés, que le sujet est bien à la bonne personne, et qu'il n'y a pas d'infinitif entre parenthèses."
@@ -553,11 +649,11 @@ function validateConj(out, assignments) {
  */
 function generate(cfg, rule, req, logger) {
 	const c = config(rule);
-	if (c.generator === 'verb_groups') return generateVerbGroups(req.num_blanks);
+	if (c.generator === 'verb_groups') return generateVerbGroups(req.num_blanks, req.grade_level);
 
 	const MAX_ATTEMPTS = 3;
 	let lastError = '';
-	const assignments = c.generator === 'conj_present' ? pickConjAssignments(rule, req.num_blanks) : null;
+	const assignments = c.generator === 'conj_present' ? pickConjAssignments(rule, req.num_blanks, req.grade_level) : null;
 
 	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 		try {
@@ -649,5 +745,6 @@ module.exports = {
 	pickConjAssignments,
 	validateConj,
 	validateQcm,
-	generateVerbGroups
+	generateVerbGroups,
+	buildGroupSentence
 };

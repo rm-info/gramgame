@@ -34,4 +34,29 @@ function validateQ(rule, items) { return ex.validateQcm({ items: items.map(([pro
 const vg = ex.generateVerbGroups(30); ok(vg.blanks.length === 30, '30 verbes');
 for (const b of vg.blanks) if (/oir/.test(b.prompt)) ok(!/se termine par -ir/.test(b.explanation), 'explication -oir : ' + b.explanation);
 ok(!vg.blanks.some(b => ['être', 'avoir'].includes(b.prompt)), 'pas d\'être/avoir');
+// Phrases « verbe conjugué » : toutes les combinaisons verbe × personne autorisée
+const conj = require('./load.cjs')('conjugaison.js');
+for (const g of Object.values(conj.POOLS.groups)) for (const list of Object.values(g)) for (const v of list) {
+  const e = conj.GROUP_SENTENCES[v];
+  ok(!!e, 'complément manquant pour ' + v);
+  const ps = (e && typeof e === 'object' && e.p) || conj.PERSONS;
+  for (const p of ps) {
+    const r = ex.buildGroupSentence(v, p);
+    ok(r && r.sentence.includes(`[[${conj.conjugatePerson(v, p)[0]}]]`) && /^[A-ZÉ]/.test(r.sentence) && r.sentence.endsWith('.'), `phrase ${v} ${p} : ${r && r.sentence}`);
+    if (r && /^(s'|se )/.test(v)) ok(/(m'|t'|s'|nous nous |vous vous |me |te |se )\[\[/i.test(r.sentence), 'pronom réfléchi : ' + r.sentence);
+    if (r && e.p) ok(!/^On /.test(r.sentence), 'pas de « on » pour un sujet inanimé : ' + r.sentence);
+  }
+}
+// Niveaux
+const easy = new Set(); for (const g of Object.values(conj.POOLS.groups)) for (const v of g[1]) easy.add(v);
+for (let k = 0; k < 20; k++) {
+  const ce1 = ex.generateVerbGroups(15, 'CE1');
+  ok(ce1.blanks.every(b => !b.prompt.includes('[[')), 'CE1 : pas de phrases');
+  ok(ce1.blanks.every(b => easy.has(b.prompt) || b.prompt === 'aller'), 'CE1 : verbes faciles seulement ' + ce1.blanks.map(b => b.prompt));
+  const cm2 = ex.generateVerbGroups(10, 'CM2');
+  ok(cm2.blanks.filter(b => b.prompt.includes('[[')).length === 4, 'CM2 : 40 % de phrases');
+  ok(cm2.blanks.every(b => b.correct === b.category && /groupe/.test(b.correct)), 'CM2 : réponses');
+}
+const a5 = ex.pickConjAssignments({ config: { pool: 'accord' } }, 12, 'CE2');
+ok(a5.every(a => a.person === '3s' || a.person === '3p'), 'accord CE2 : 3e personne seulement');
 console.log(fail ? `${fail} échec(s)` : 'tout OK'); if (fail) process.exit(1);

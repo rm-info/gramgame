@@ -69,7 +69,10 @@ const IRREGULAR = {
 	convaincre: 'convaincs,convaincs,convainc,convainquons,convainquez,convainquent',
 	coudre: 'couds,couds,coud,cousons,cousez,cousent',
 	résoudre: 'résous,résous,résout,résolvons,résolvez,résolvent',
-	haïr: 'hais,hais,hait,haïssons,haïssez,haïssent'
+	haïr: 'hais,hais,hait,haïssons,haïssez,haïssent',
+	vêtir: 'vêts,vêts,vêt,vêtons,vêtez,vêtent',
+	maudire: 'maudis,maudis,maudit,maudissons,maudissez,maudissent',
+	moudre: 'mouds,mouds,moud,moulons,moulez,moulent'
 };
 
 // Dérivés conjugués comme leur base (préfixe + formes de la base).
@@ -110,7 +113,7 @@ const UIRE = ['conduire', 'construire', 'détruire', 'produire', 'traduire', 'cu
 const AITRE = ['connaître', 'reconnaître', 'paraître', 'apparaître', 'disparaître', 'naître', 'méconnaître'];
 
 // 2e groupe : verbes en -ir qui font « nous …issons » (liste fermée).
-const SECOND_GROUP = ['finir', 'choisir', 'grandir', 'réussir', 'rougir', 'obéir', 'désobéir', 'punir', 'remplir', 'salir', 'bâtir', 'agir', 'applaudir', 'avertir', 'blanchir', 'guérir', 'nourrir', 'ralentir', 'réfléchir', 'saisir', 'vieillir', 'maigrir', 'grossir', 'jaunir', 'noircir', 'rajeunir', 'atterrir', 'fleurir', 'unir', 'réunir', 'définir', 'envahir', 'établir', 'trahir', 'accomplir', 'avertir', 'bondir', 'durcir', 'éblouir', 'élargir', 'embellir', 'enrichir', 'faiblir', 'franchir', 'garantir', 'gémir', 'jaillir', 'mûrir', 'pâlir', 'périr', 'rafraîchir', 'ravir', 'refroidir', 'rétablir', 'rôtir', 'surgir', 'vernir', 'aboutir', 'adoucir', 'affaiblir', 'agrandir', 'alourdir', 'amortir', 'appauvrir', 'arrondir', 'assouplir', 'assombrir', 'blêmir', 'brandir', 'chérir', 'convertir', 'démolir', 'divertir', 'engloutir', 'épanouir', 'frémir', 'fournir', 'investir', 'munir', 'obscurcir', 'polir', 'raccourcir', 'raidir', 'ralentir', 'resplendir', 'ternir', 'vomir', 'haïr'];
+const SECOND_GROUP = ['finir', 'choisir', 'grandir', 'réussir', 'rougir', 'obéir', 'désobéir', 'punir', 'remplir', 'salir', 'bâtir', 'agir', 'applaudir', 'avertir', 'blanchir', 'guérir', 'nourrir', 'ralentir', 'réfléchir', 'saisir', 'vieillir', 'maigrir', 'grossir', 'jaunir', 'noircir', 'rajeunir', 'atterrir', 'fleurir', 'unir', 'réunir', 'définir', 'envahir', 'établir', 'trahir', 'accomplir', 'avertir', 'bondir', 'durcir', 'éblouir', 'élargir', 'embellir', 'enrichir', 'faiblir', 'franchir', 'garantir', 'gémir', 'jaillir', 'mûrir', 'pâlir', 'périr', 'rafraîchir', 'ravir', 'refroidir', 'rétablir', 'rôtir', 'surgir', 'vernir', 'aboutir', 'adoucir', 'affaiblir', 'agrandir', 'alourdir', 'amortir', 'appauvrir', 'arrondir', 'assouplir', 'assombrir', 'blêmir', 'brandir', 'chérir', 'convertir', 'démolir', 'divertir', 'engloutir', 'épanouir', 'frémir', 'fournir', 'investir', 'munir', 'obscurcir', 'polir', 'raccourcir', 'raidir', 'ralentir', 'resplendir', 'ternir', 'vomir', 'évanouir', 'haïr'];
 
 // -eler / -eter : doublent la consonne (seuls appeler, jeter et leurs dérivés
 // restent obligatoirement doublés après la réforme de 1990).
@@ -232,42 +235,160 @@ function verbGroup(rawVerb) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Réservoirs de verbes par exercice
+// Niveau scolaire → palier de difficulté
+// ────────────────────────────────────────────────────────────────────────────
+// Palier 1 (CP–CE2) : verbes très courants, réguliers, peu de pièges.
+// Palier 2 (CM1–6e) : + les pièges classiques (aller, -ir du 3e groupe, -oir…).
+// Palier 3 (5e et +) : + verbes rares ou difficiles (vêtir, bouillir, maudire…).
+const LEVEL_TIER = {
+	CP: 1, CE1: 1, CE2: 1,
+	CM1: 2, CM2: 2, '6e': 2,
+	'5e': 3, '4e': 3, '3e': 3, '2nde': 3, '1re': 3, Terminale: 3, Adulte: 3
+};
+
+function levelTier(grade) {
+	return LEVEL_TIER[grade] || 2;
+}
+
+// Mélange des difficultés tirées selon le palier (poids relatifs).
+const TIER_MIX = {
+	1: { 1: 1 },
+	2: { 1: 2, 2: 3 },
+	3: { 1: 1, 2: 2, 3: 2 }
+};
+
+// Exercice des groupes : part de verbes présentés conjugués dans une phrase
+// (« Ils [[partent]] demain. ») plutôt qu'à l'infinitif.
+const CONJUGATED_SHARE = {
+	CP: 0, CE1: 0, CE2: 0, CM1: 0,
+	CM2: 0.4, '6e': 0.4,
+	'5e': 0.6, '4e': 0.6, '3e': 0.6, '2nde': 0.6, '1re': 0.6, Terminale: 0.6, Adulte: 0.6
+};
+
+function conjugatedShare(grade) {
+	return CONJUGATED_SHARE[grade] ?? 0.4;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Réservoirs de verbes : { groupe ou famille : { difficulté : [verbes] } }
 // ────────────────────────────────────────────────────────────────────────────
 const POOLS = {
-	// Présent de l'indicatif : les 3 groupes, verbes très courants.
+	// Présent de l'indicatif.
 	present: {
-		1: ['chanter', 'jouer', 'regarder', 'aimer', 'parler', 'marcher', 'danser', 'écouter', 'porter', 'ranger', 'manger', 'commencer', 'lancer', 'avancer', 'nager', 'voyager', 'envoyer', 'nettoyer', 'essayer', 'payer', 'appeler', 'jeter', 'acheter', 'lever', 'mener', 'préférer', 'espérer', 'répéter', 'crier', 'oublier', 'trouver', 'arriver', 'rester', 'tomber', 'penser', 'travailler'],
-		2: ['finir', 'choisir', 'grandir', 'réussir', 'obéir', 'remplir', 'réfléchir', 'applaudir', 'rougir', 'bâtir', 'ralentir', 'guérir'],
-		3: ['être', 'avoir', 'aller', 'faire', 'dire', 'venir', 'prendre', 'mettre', 'pouvoir', 'vouloir', 'savoir', 'voir', 'devoir', 'partir', 'sortir', 'dormir', 'courir', 'lire', 'écrire', 'boire', 'croire', 'ouvrir', 'offrir', 'recevoir', 'connaître', 'vivre', 'suivre', 'rire', 'rendre', 'vendre', 'attendre', 'entendre', 'répondre', 'descendre', 'perdre', 'peindre', 'éteindre', 'craindre', 'conduire', 'construire', 'tenir', 'devenir', 'comprendre', 'apprendre', 'sentir', 'servir', 'cueillir', 'battre']
+		1: {
+			1: ['chanter', 'jouer', 'regarder', 'aimer', 'parler', 'marcher', 'danser', 'écouter', 'porter', 'trouver', 'arriver', 'rester', 'tomber', 'penser', 'travailler', 'crier', 'oublier'],
+			2: ['manger', 'ranger', 'nager', 'voyager', 'commencer', 'lancer', 'avancer', 'envoyer', 'nettoyer', 'essayer', 'payer', 'appeler', 'jeter', 'acheter', 'lever', 'mener', 'préférer', 'espérer', 'répéter'],
+			3: ['protéger', 'étiqueter', 'harceler', 'renouveler', 'feuilleter', 'céder', 'célébrer', 'employer', 'créer']
+		},
+		2: {
+			1: ['finir', 'choisir', 'grandir', 'remplir', 'rougir'],
+			2: ['réussir', 'obéir', 'réfléchir', 'applaudir', 'bâtir', 'ralentir', 'guérir'],
+			3: ['haïr', 'éblouir', 'frémir', 'resplendir', 'assouplir']
+		},
+		3: {
+			1: ['être', 'avoir', 'aller', 'faire', 'dire', 'venir', 'prendre', 'voir', 'pouvoir', 'vouloir', 'partir', 'dormir', 'lire', 'écrire', 'mettre'],
+			2: ['savoir', 'devoir', 'sortir', 'courir', 'boire', 'croire', 'ouvrir', 'offrir', 'recevoir', 'vivre', 'suivre', 'rire', 'rendre', 'vendre', 'attendre', 'entendre', 'répondre', 'descendre', 'perdre', 'tenir', 'devenir', 'comprendre', 'apprendre', 'sentir', 'servir', 'cueillir', 'battre', 'connaître'],
+			3: ['peindre', 'éteindre', 'craindre', 'conduire', 'construire', 'acquérir', 's\'asseoir', 'résoudre', 'vaincre', 'coudre', 'moudre', 'bouillir', 'fuir', 'mourir', 'valoir', 'rompre', 'vêtir', 'maudire']
+		}
 	},
-	// -eler / -eter : les deux familles + pièges.
+	// -eler / -eter : consonne doublée ou accent grave.
 	eter_eler: {
-		double: ['appeler', 'rappeler', 'jeter', 'rejeter', 'projeter', 'épeler', 'étiqueter', 'feuilleter', 'ficeler', 'renouveler', 'atteler'],
-		grave: ['acheter', 'racheter', 'geler', 'congeler', 'peler', 'modeler', 'harceler', 'marteler', 'haleter']
+		double: {
+			1: ['appeler', 'jeter'],
+			2: ['rappeler', 'rejeter', 'projeter', 'épeler'],
+			3: ['étiqueter', 'feuilleter', 'ficeler', 'renouveler', 'atteler']
+		},
+		grave: {
+			1: ['acheter', 'geler'],
+			2: ['racheter', 'congeler', 'peler', 'modeler'],
+			3: ['harceler', 'marteler', 'haleter', 'ciseler', 'dégeler']
+		}
 	},
-	// Accord sujet-verbe : verbes fréquents dont la 3e personne du singulier et
-	// du pluriel diffèrent à l'écrit ET à l'oral ou à l'écrit seulement.
+	// Accord sujet-verbe (la difficulté vient surtout des sujets : voir le prompt).
 	accord: {
-		1: ['chanter', 'jouer', 'regarder', 'parler', 'marcher', 'arriver', 'manger', 'crier', 'travailler', 'traverser', 'aboyer', 'briller', 'tomber', 'rentrer', 'habiter'],
-		2: ['finir', 'grandir', 'choisir', 'réussir', 'applaudir', 'obéir'],
-		3: ['être', 'avoir', 'aller', 'faire', 'dire', 'venir', 'prendre', 'pouvoir', 'vouloir', 'voir', 'partir', 'dormir', 'courir', 'lire', 'écrire', 'boire', 'attendre', 'entendre', 'répondre', 'mettre']
+		1: {
+			1: ['chanter', 'jouer', 'regarder', 'parler', 'marcher', 'arriver', 'crier', 'tomber', 'rentrer', 'habiter', 'danser'],
+			2: ['manger', 'traverser', 'briller', 'travailler', 'aboyer', 'nager', 'voyager', 'commencer'],
+			3: ['appeler', 'jeter', 'acheter', 'préférer', 'envoyer', 'essayer']
+		},
+		2: {
+			1: ['finir', 'grandir', 'choisir'],
+			2: ['réussir', 'applaudir', 'obéir', 'réfléchir'],
+			3: ['éblouir', 'resplendir', 'frémir']
+		},
+		3: {
+			1: ['être', 'avoir', 'aller', 'faire', 'dire', 'venir', 'prendre', 'voir'],
+			2: ['pouvoir', 'vouloir', 'partir', 'dormir', 'courir', 'lire', 'écrire', 'boire', 'attendre', 'entendre', 'répondre', 'mettre'],
+			3: ['peindre', 'craindre', 'conduire', 'recevoir', 'connaître', 'apercevoir', 'résoudre', 'vaincre']
+		}
 	},
-	// Groupes des verbes : pièges inclus (aller, -ir du 3e groupe, -oir, -re).
+	// Groupes des verbes.
 	groups: {
-		1: ['chanter', 'jouer', 'manger', 'lancer', 'envoyer', 'appeler', 'acheter', 'crier', 'nager', 'oublier', 'préférer', 'payer', 'tomber', 'trouver', 'rêver', 'nettoyer'],
-		2: ['finir', 'choisir', 'grandir', 'réussir', 'obéir', 'remplir', 'réfléchir', 'applaudir', 'rougir', 'bâtir', 'nourrir', 'ralentir', 'guérir', 'atterrir', 'fleurir', 'vieillir'],
-		3: ['aller', 'partir', 'sortir', 'dormir', 'courir', 'venir', 'tenir', 'ouvrir', 'offrir', 'cueillir', 'mourir', 'servir', 'sentir', 'mentir', 'fuir', 'voir', 'pouvoir', 'vouloir', 'savoir', 'devoir', 'recevoir', 'prendre', 'mettre', 'faire', 'dire', 'lire', 'écrire', 'boire', 'croire', 'rire', 'vivre', 'rendre', 'vendre', 'attendre', 'peindre', 'connaître', 'conduire']
+		1: {
+			1: ['chanter', 'jouer', 'danser', 'parler', 'regarder', 'marcher', 'aimer', 'écouter', 'trouver', 'tomber', 'crier', 'oublier'],
+			2: ['manger', 'lancer', 'nager', 'envoyer', 'appeler', 'acheter', 'payer', 'préférer', 'nettoyer', 'rêver', 'essayer'],
+			3: ['créer', 'épier', 'harceler', 'louvoyer', 'chatoyer', 'ployer', 'ressasser']
+		},
+		2: {
+			1: ['finir', 'choisir', 'grandir', 'remplir', 'rougir'],
+			2: ['réussir', 'obéir', 'réfléchir', 'applaudir', 'bâtir', 'nourrir', 'ralentir', 'guérir', 'atterrir', 'fleurir', 'vieillir', 'maigrir', 'salir', 'punir'],
+			3: ['haïr', 'assouplir', 'éblouir', 'frémir', 'resplendir', 'jaillir', 'rajeunir', 's\'évanouir', 'mûrir', 'ternir']
+		},
+		3: {
+			1: ['faire', 'dire', 'prendre', 'mettre', 'lire', 'écrire', 'boire', 'voir', 'pouvoir', 'vouloir', 'savoir', 'rire', 'vendre', 'attendre', 'rendre'],
+			2: ['aller', 'partir', 'sortir', 'dormir', 'courir', 'venir', 'tenir', 'ouvrir', 'offrir', 'cueillir', 'mourir', 'servir', 'sentir', 'mentir', 'devoir', 'recevoir', 'croire', 'vivre', 'peindre', 'connaître', 'conduire', 'fuir'],
+			3: ['vêtir', 'bouillir', 'acquérir', 'conquérir', 'maudire', 's\'asseoir', 'valoir', 'vaincre', 'coudre', 'résoudre', 'rompre', 'moudre', 'plaindre', 'joindre', 'convaincre', 'interrompre']
+		}
 	}
+};
+
+// Exercice des groupes, mode « verbe conjugué » : un complément par verbe,
+// écrit à la main pour que la phrase soit correcte à toutes les personnes
+// proposées. `p` restreint les personnes quand le sens l'impose.
+const GROUP_SENTENCES = {
+	chanter: 'une chanson', jouer: 'au ballon', danser: 'dans le salon', parler: 'très fort',
+	regarder: 'la télévision', marcher: 'dans la forêt', aimer: 'les fraises', écouter: 'de la musique',
+	trouver: 'un trésor', tomber: 'dans la neige', crier: 'de joie', oublier: 'la réponse',
+	manger: 'une pomme', lancer: 'le ballon', nager: 'dans la piscine', envoyer: 'une lettre',
+	appeler: 'le médecin', acheter: 'du pain', payer: 'les courses', préférer: 'le chocolat',
+	nettoyer: 'la cuisine', rêver: 'de vacances', essayer: 'un chapeau',
+	créer: 'un jeu vidéo', épier: 'les voisins', harceler: 'le guide de questions',
+	louvoyer: 'entre les rochers', chatoyer: { c: 'au soleil', p: ['3s', '3p'] },
+	ployer: 'sous le poids', ressasser: 'les mêmes souvenirs',
+	finir: 'le repas', choisir: 'un livre', grandir: 'très vite', remplir: 'le seau', rougir: 'de honte',
+	réussir: "l'examen", obéir: 'au maître', réfléchir: 'à la question', applaudir: 'les acteurs',
+	bâtir: 'une cabane', nourrir: 'les poules', ralentir: 'au virage', guérir: 'rapidement',
+	atterrir: 'à Paris', fleurir: { c: 'au printemps', p: ['3s', '3p'] }, vieillir: 'doucement',
+	maigrir: 'un peu', salir: 'le tapis', punir: 'le tricheur',
+	haïr: 'le mensonge', assouplir: 'les règles', éblouir: 'le public', frémir: 'de peur',
+	resplendir: 'de joie', jaillir: { c: 'de la roche', p: ['3s', '3p'] }, rajeunir: 'de dix ans',
+	"s'évanouir": 'de fatigue', mûrir: { c: 'au soleil', p: ['3s', '3p'] },
+	ternir: { c: 'avec le temps', p: ['3s', '3p'] },
+	faire: 'un gâteau', dire: 'la vérité', prendre: 'le bus', mettre: 'la table', lire: 'un roman',
+	écrire: 'une lettre', boire: 'du lait', voir: 'la mer', pouvoir: 'venir', vouloir: 'un gâteau',
+	savoir: 'la leçon', rire: 'aux éclats', vendre: 'des fleurs', attendre: 'le train', rendre: 'les livres',
+	aller: "à l'école", partir: 'en vacances', sortir: 'le soir', dormir: 'profondément',
+	courir: 'dans le parc', venir: 'demain', tenir: 'la corde', ouvrir: 'la fenêtre', offrir: 'un cadeau',
+	cueillir: 'des fleurs', mourir: 'de rire', servir: 'le dessert', sentir: 'le parfum', mentir: 'souvent',
+	devoir: 'partir', recevoir: 'une lettre', croire: 'cette histoire', vivre: 'à la campagne',
+	peindre: 'un tableau', connaître: 'la réponse', conduire: 'la voiture', fuir: 'le danger',
+	vêtir: 'les enfants', bouillir: "d'impatience", acquérir: "de l'expérience", conquérir: 'le château',
+	maudire: 'la pluie', "s'asseoir": 'sur le banc', valoir: { c: 'une fortune', p: ['3s', '3p'] },
+	vaincre: 'la peur', coudre: 'un bouton', résoudre: "l'énigme", rompre: 'le silence', moudre: 'le café',
+	plaindre: 'les victimes', joindre: 'les deux bouts', convaincre: 'le jury', interrompre: 'la réunion'
 };
 
 module.exports = {
 	PERSONS,
 	PERSON_LABELS,
 	POOLS,
+	GROUP_SENTENCES,
+	TIER_MIX,
 	DOUBLE_ONLY,
 	GRAVE_ONLY,
 	conjugate,
 	conjugatePerson,
-	verbGroup
+	verbGroup,
+	levelTier,
+	conjugatedShare
 };
