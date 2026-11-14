@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { pb, errorMessage } from '$lib/pb';
 	import { mapExercise, type ExerciseRow, type BlankRow, type RuleInfo } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
@@ -13,6 +14,9 @@
 	import { hasSeveralGroups, optionsForBlank, ruleGroups, groupLabel } from '$lib/confusion';
 
 	const HARD_MODE_KEY = 'gramgame.hard_mode';
+	// Réponses en cours, par compte et par exercice : un rechargement (ou un
+	// onglet fermé par le système) ne fait plus perdre ce qui a été tapé.
+	const draftKey = (id: string) => `gramgame.draft.${pb.authStore.record?.id ?? 'anon'}.${id}`;
 
 	interface ExerciseData {
 		id: string;
@@ -127,6 +131,7 @@
 		for (const b of exercise.blanks) {
 			responses[b.position] = null;
 		}
+		restoreDraft(exercise.id, exercise.blanks);
 
 		if (!ex.rule) {
 			loadError = 'Règle introuvable.';
@@ -136,6 +141,53 @@
 		rule = ex.rule;
 		loading = false;
 	});
+
+	function restoreDraft(id: string, blanks: BlankRow[]) {
+		try {
+			const saved = JSON.parse(localStorage.getItem(draftKey(id)) ?? 'null');
+			if (!saved || typeof saved !== 'object') return;
+			for (const b of blanks) {
+				const v = saved[b.position];
+				if (typeof v === 'string') responses[b.position] = v;
+			}
+		} catch {
+			// brouillon illisible ou stockage indisponible : on repart de zéro
+		}
+	}
+
+	// Sauvegarde du brouillon à chaque réponse (tant que l'exercice n'est pas corrigé).
+	$effect(() => {
+		if (!exercise || result) return;
+		const answered = Object.fromEntries(Object.entries(responses).filter(([, v]) => v !== null));
+		try {
+			if (Object.keys(answered).length) localStorage.setItem(draftKey(exercise.id), JSON.stringify(answered));
+			else localStorage.removeItem(draftKey(exercise.id));
+		} catch {
+			// stockage indisponible : pas de brouillon
+		}
+	});
+
+	let deleting = $state(false);
+	async function handleDelete() {
+		if (!exercise) return;
+		const ok = confirm(
+			"Supprimer définitivement cet exercice ?\n\nLes résultats des élèves qui l'ont déjà fait seront supprimés aussi."
+		);
+		if (!ok) return;
+		deleting = true;
+		try {
+			await pb.collection('exercises').delete(exercise.id);
+			try {
+				localStorage.removeItem(draftKey(exercise.id));
+			} catch {
+				// rien à nettoyer
+			}
+			await goto(`${base}/`);
+		} catch (e) {
+			alert(`Suppression impossible : ${errorMessage(e)}`);
+			deleting = false;
+		}
+	}
 
 	async function handleSubmit() {
 		if (!exercise || !view || !allFilled) return;
@@ -157,6 +209,11 @@
 				responses: payload,
 				hard_mode: hardActive
 			});
+			try {
+				localStorage.removeItem(draftKey(exercise.id));
+			} catch {
+				// rien à nettoyer
+			}
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 		} catch (e) {
 			submitError = (e as Error).message;
@@ -249,7 +306,12 @@
 						{/if}
 					</div>
 					{#if activeUsername.canEditExercises}
-						<a href={`${base}/exercise/${exercise.id}/edit`} class="edit-link">Modifier</a>
+						<div class="editor-actions">
+							<a href={`${base}/exercise/${exercise.id}/edit`} class="edit-link">Modifier</a>
+							<button type="button" class="delete-btn" onclick={handleDelete} disabled={deleting}>
+								{deleting ? 'Suppression…' : 'Supprimer'}
+							</button>
+						</div>
 					{/if}
 				</div>
 				<p class="muted">
@@ -430,6 +492,25 @@
 		border-radius: 999px;
 		font-size: 0.85em;
 		font-weight: 600;
+	}
+	.editor-actions {
+		display: flex;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.delete-btn {
+		font-size: 0.9em;
+		padding: 4px 10px;
+		border: 1px solid var(--color-error, #b3261e);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--color-error, #b3261e);
+		cursor: pointer;
+	}
+	.delete-btn:hover:not(:disabled) {
+		background: var(--color-error, #b3261e);
+		color: white;
 	}
 	.edit-link {
 		font-size: 0.9em;
