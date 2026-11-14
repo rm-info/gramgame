@@ -472,7 +472,9 @@ function generateAppreciation(cfg, exercise, rule, grading) {
 
 	const exerciseKind = {
 		qcm: 'un QCM',
-		free_text: 'un exercice de conjugaison à compléter au clavier'
+		free_text: 'un exercice de conjugaison à compléter au clavier',
+		span: 'un exercice où il faut retrouver le groupe nominal sujet de chaque phrase',
+		punctuation: "un exercice où il faut rétablir la ponctuation d'un texte"
 	}[rule.rule_type] || 'un exercice à trous';
 	const weakGroups = Object.entries(grading.per_group_breakdown || {})
 		.filter(([, v]) => v.ok < v.total)

@@ -22,6 +22,7 @@
 		verified: boolean;
 		verified_at: string | null;
 		verified_by_username: string | null;
+		extra: ExerciseRow['extra'];
 	}
 
 	let exerciseId = $derived(page.params.id);
@@ -39,7 +40,34 @@
 	let saveMsg = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
 
+	// Ponctuation : noms propres (gardent leur majuscule en début de phrase).
+	let properNounsText = $state('');
+	const isList = $derived(ruleType === 'qcm' || ruleType === 'span');
+
 	const validation = $derived.by(() => {
+		if (ruleType === 'punctuation') {
+			return {
+				markerCount: 0,
+				blankCount: 0,
+				markersWithoutBlank: [] as number[],
+				blanksWithoutMarker: [] as number[],
+				incomplete: [] as number[],
+				ok: editText.trim().length > 0
+			};
+		}
+		if (ruleType === 'span') {
+			const incomplete = editBlanks
+				.filter((b) => !/\[\[[^\]]+\]\]/.test(b.prompt ?? ''))
+				.map((b) => b.position);
+			return {
+				markerCount: 0,
+				blankCount: editBlanks.length,
+				markersWithoutBlank: [] as number[],
+				blanksWithoutMarker: [] as number[],
+				incomplete,
+				ok: editBlanks.length > 0 && incomplete.length === 0
+			};
+		}
 		if (ruleType === 'qcm') {
 			const incomplete = editBlanks
 				.filter((b) => !(b.prompt ?? '').trim() || !(rule?.candidates ?? []).includes(b.correct))
@@ -96,11 +124,13 @@
 				if (type === 'free_text') {
 					return { ...b, accepted_text: (b.accepted?.length ? b.accepted : [b.correct]).join(', ') };
 				}
-				if (type === 'qcm') return { ...b };
+				if (type === 'qcm' || type === 'span') return { ...b };
 				// L'ancien champ distractor est abandonné : les options viennent des groupes.
 				return { position: b.position, correct: b.correct };
 			})
 			.sort((a, b) => a.position - b.position);
+		if (type === 'punctuation') editBlanks = [];
+		properNounsText = (ex.extra?.proper_nouns ?? []).join(', ');
 		editVerified = exercise.verified;
 
 		if (!ex.rule) {
@@ -122,6 +152,10 @@
 		if (ruleType === 'qcm') {
 			const next = Math.max(0, ...editBlanks.map((b) => b.position)) + 1;
 			row = { position: next, prompt: '', correct: cands[0] ?? '', explanation: '' };
+		}
+		if (ruleType === 'span') {
+			const next = Math.max(0, ...editBlanks.map((b) => b.position)) + 1;
+			row = { position: next, prompt: '', correct: '', explanation: '', kind: 'simple' };
 		}
 		editBlanks = [...editBlanks, row].sort((a, b) => a.position - b.position);
 	}
@@ -151,6 +185,18 @@
 				category: b.correct
 			}));
 		}
+		if (ruleType === 'span') {
+			// Mots, réponse attendue et catégorie recalculés par le serveur.
+			return editBlanks.map((b, i) => ({
+				position: i + 1,
+				prompt: (b.prompt ?? '').trim(),
+				explanation: (b.explanation ?? '').trim(),
+				kind: b.kind ?? 'simple',
+				correct: ''
+			}));
+		}
+		// Ponctuation : signes attendus recalculés par le serveur à partir du texte.
+		if (ruleType === 'punctuation') return exercise?.blanks ?? [];
 		return editBlanks.map((b) => ({ position: b.position, correct: b.correct }));
 	}
 
@@ -177,6 +223,17 @@
 					text: editText,
 					blanks: blanksForSave(),
 					num_blanks: editBlanks.length,
+					...(ruleType === 'punctuation'
+						? {
+								extra: {
+									...(exercise.extra ?? {}),
+									proper_nouns: properNounsText
+										.split(',')
+										.map((w) => w.trim())
+										.filter(Boolean)
+								}
+							}
+						: {}),
 					...verificationFields
 				})
 			);
@@ -188,6 +245,8 @@
 		saving = false;
 		// Synchronise l'état local pour que les prochains saves comparent
 		// correctement.
+		exercise.blanks = updated.blanks;
+		exercise.extra = updated.extra;
 		exercise.verified = updated.verified;
 		exercise.verified_at = updated.verified_at;
 		exercise.verified_by_username = updated.verified_by_username;
@@ -218,7 +277,26 @@
 
 		<div class="editor-grid">
 			<div class="card stack editor-pane editor-pane-text">
-				{#if ruleType === 'qcm'}
+				{#if ruleType === 'punctuation'}
+				<label for="text">Texte ponctué (l'élève le verra sans ponctuation, en minuscules en début de phrase) :</label>
+				<textarea id="text" bind:value={editText}></textarea>
+				<label for="proper">Noms propres (gardent leur majuscule), séparés par des virgules :</label>
+				<input id="proper" type="text" bind:value={properNounsText} placeholder="Léa, Paris" />
+				<p class="muted small">
+					Ponctuation autorisée : <code>.</code> <code>,</code> <code>?</code> <code>!</code>. Les
+					signes attendus sont recalculés à l'enregistrement. Un <code>.</code> attendu accepte aussi
+					<code>!</code> ; un <code>!</code> accepte <code>.</code> sauf dans une phrase exclamative
+					(« Quel… », « Comme… »).
+				</p>
+				{:else if ruleType === 'span'}
+				<label for="text">Consigne affichée à l'élève :</label>
+				<textarea id="text" bind:value={editText} rows="3" class="consigne-input"></textarea>
+				<p class="muted small">
+					Dans chaque phrase, mets le groupe nominal sujet complet entre <code>[[ ]]</code> (ex. :
+					<code>Ce matin, [[le facteur de Léa]] passe.</code>). Les mots à cliquer et la bonne
+					réponse sont recalculés à l'enregistrement.
+				</p>
+				{:else if ruleType === 'qcm'}
 				<label for="text">Consigne affichée à l'élève :</label>
 				<textarea id="text" bind:value={editText} rows="3" class="consigne-input"></textarea>
 				<p class="muted small">
@@ -256,23 +334,58 @@
 				{/if}
 				{#if validation.incomplete.length > 0}
 					<p class="warning">
-						{ruleType === 'qcm' ? 'Questions incomplètes' : 'Trous sans réponse acceptée'} :
+						{isList ? 'Questions incomplètes' : 'Trous sans réponse acceptée'} :
 						{validation.incomplete.join(', ')}
 					</p>
 				{/if}
 			</div>
 
+			{#if ruleType !== 'punctuation'}
 			<div class="card stack editor-pane editor-pane-blanks">
 				<div class="row-between">
-					<h2>{ruleType === 'qcm' ? 'Questions' : 'Trous'}</h2>
+					<h2>{isList ? (ruleType === 'span' ? 'Phrases' : 'Questions') : 'Trous'}</h2>
 					<button type="button" class="secondary" onclick={addBlank}>
-						+ Ajouter {ruleType === 'qcm' ? 'une question' : 'un trou'}
+						+ Ajouter {isList ? (ruleType === 'span' ? 'une phrase' : 'une question') : 'un trou'}
 					</button>
 				</div>
 
 				<div class="blanks-scroll">
 					{#if editBlanks.length === 0}
 						<p class="muted">Rien pour l'instant. Ajoute-en avec le bouton ci-dessus.</p>
+					{:else if ruleType === 'span'}
+						<ol class="qcm-edit">
+							{#each editBlanks as b (b.position)}
+								<li class="stack">
+									<input
+										type="text"
+										bind:value={b.prompt}
+										placeholder="Ce matin, [[le facteur]] passe."
+									/>
+									<div class="qcm-row">
+										<select bind:value={b.kind} aria-label="Type de sujet">
+											<option value="simple">sujet court</option>
+											<option value="long">sujet long</option>
+											<option value="eloigne">après un complément</option>
+											<option value="compose">sujet composé</option>
+											<option value="inverse">sujet inversé</option>
+										</select>
+										<input
+											type="text"
+											bind:value={b.explanation}
+											placeholder="Explication (montrée après correction)"
+										/>
+										<button
+											type="button"
+											class="link danger"
+											title="Supprimer cette phrase"
+											onclick={() => removeBlank(b.position)}
+										>
+											✕
+										</button>
+									</div>
+								</li>
+							{/each}
+						</ol>
 					{:else if ruleType === 'qcm'}
 						<ol class="qcm-edit">
 							{#each editBlanks as b (b.position)}
@@ -385,6 +498,7 @@
 					{/if}
 				</div>
 			</div>
+			{/if}
 		</div>
 
 		<div class="card stack">

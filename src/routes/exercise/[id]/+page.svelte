@@ -8,6 +8,8 @@
 	import { activeUsername } from '$lib/active-username.svelte';
 	import ExerciseText from '$lib/components/ExerciseText.svelte';
 	import QcmList from '$lib/components/QcmList.svelte';
+	import SpanSelectList from '$lib/components/SpanSelectList.svelte';
+	import PunctuationText from '$lib/components/PunctuationText.svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { correctAttempt, type CorrectionResult } from '$lib/api/correct';
 	import { truncateExercise } from '$lib/truncate-exercise';
@@ -29,6 +31,7 @@
 		verified: boolean;
 		verified_at: string | null;
 		verified_by_username: string | null;
+		extra: ExerciseRow['extra'];
 	}
 
 	let exercise = $state<ExerciseData | null>(null);
@@ -88,7 +91,15 @@
 		return blank?.verb ?? '';
 	}
 
-	const unit = $derived(ruleType === 'qcm' ? 'questions' : 'trous');
+	const unit = $derived(
+		ruleType === 'qcm' ? 'questions' : ruleType === 'span' || ruleType === 'punctuation' ? 'phrases' : 'trous'
+	);
+	// Ponctuation : réponses indexées par mot (pas par trou) ; on compte les phrases.
+	const isPunct = $derived(ruleType === 'punctuation');
+	const words = $derived(exercise?.extra?.words ?? []);
+	const sentenceCount = $derived(
+		exercise ? exercise.blanks.filter((b) => ['.', '?', '!'].includes(b.correct)).length : 0
+	);
 
 	function filled(v: string | null | undefined) {
 		return v !== null && v !== undefined && v.trim() !== '';
@@ -102,8 +113,10 @@
 		if (!exercise) return null;
 		const requested = maxParam > 0 ? maxParam : exercise.num_blanks;
 		const effective = Math.max(1, Math.min(requested, exercise.num_blanks));
-		// QCM : on garde simplement les N premières questions.
-		if (ruleType === 'qcm') {
+		// Ponctuation : le texte entier, pas de version courte.
+		if (ruleType === 'punctuation') return { text: exercise.text, blanks: exercise.blanks };
+		// QCM, GNS : on garde simplement les N premières questions.
+		if (ruleType === 'qcm' || ruleType === 'span') {
 			const sorted = [...exercise.blanks].sort((a, b) => a.position - b.position);
 			return { text: exercise.text, blanks: sorted.slice(0, effective) };
 		}
@@ -112,7 +125,10 @@
 
 	const blankPositions = $derived(view?.blanks.map((b) => b.position) ?? []);
 	const allFilled = $derived(
-		view && blankPositions.every((p) => filled(responses[p]))
+		view &&
+			(isPunct
+				? Object.values(responses).some((v) => filled(v))
+				: blankPositions.every((p) => filled(responses[p])))
 	);
 
 	onMount(async () => {
@@ -128,10 +144,14 @@
 			return;
 		}
 		exercise = ex as ExerciseData;
-		for (const b of exercise.blanks) {
-			responses[b.position] = null;
+		// Ponctuation : une réponse par mot, aucune au départ.
+		const punctuation = ex.rule?.rule_type === 'punctuation';
+		if (!punctuation) {
+			for (const b of exercise.blanks) {
+				responses[b.position] = null;
+			}
 		}
-		restoreDraft(exercise.id, exercise.blanks);
+		restoreDraft(exercise.id, exercise.blanks, punctuation);
 
 		if (!ex.rule) {
 			loadError = 'Règle introuvable.';
@@ -142,10 +162,16 @@
 		loading = false;
 	});
 
-	function restoreDraft(id: string, blanks: BlankRow[]) {
+	function restoreDraft(id: string, blanks: BlankRow[], punctuation = false) {
 		try {
 			const saved = JSON.parse(localStorage.getItem(draftKey(id)) ?? 'null');
 			if (!saved || typeof saved !== 'object') return;
+			if (punctuation) {
+				for (const [k, v] of Object.entries(saved)) {
+					if (/^\d+$/.test(k) && typeof v === 'string') responses[Number(k)] = v;
+				}
+				return;
+			}
 			for (const b of blanks) {
 				const v = saved[b.position];
 				if (typeof v === 'string') responses[b.position] = v;
@@ -198,7 +224,7 @@
 		const keptPositions = new Set(view.blanks.map((b) => b.position));
 		const payload: Record<string, string> = {};
 		for (const [pos, val] of Object.entries(responses)) {
-			if (filled(val) && keptPositions.has(Number(pos))) {
+			if (filled(val) && (isPunct || keptPositions.has(Number(pos)))) {
 				payload[pos] = (val as string).trim();
 			}
 		}
@@ -264,10 +290,20 @@
 
 			<details class="card">
 				<summary>
-					{ruleType === 'qcm' ? 'Voir les corrections' : 'Voir le texte avec les corrections'}
+					{ruleType === 'qcm' || ruleType === 'span'
+						? 'Voir les corrections'
+						: 'Voir le texte avec les corrections'}
 				</summary>
 				<div style="margin-top: var(--space-4);">
-					{#if ruleType === 'qcm'}
+					{#if ruleType === 'span'}
+						<SpanSelectList items={view.blanks} bind:responses readonly results={result.per_blank} />
+					{:else if ruleType === 'punctuation'}
+						<PunctuationText {words} bind:responses readonly results={result.per_blank} />
+						<p class="muted small legend">
+							<span class="lg-right">.</span> juste · <span class="lg-wrong">.</span> en trop ou faux ·
+							<span class="lg-missed">.</span> manquant
+						</p>
+					{:else if ruleType === 'qcm'}
 						<QcmList
 							items={view.blanks}
 							options={rule.candidates}
@@ -316,7 +352,7 @@
 				</div>
 				<p class="muted">
 					Thème : <em>{exercise.theme}</em> · Niveau : {exercise.grade_level} ·
-					{view.blanks.length} {unit}
+					{isPunct ? sentenceCount : view.blanks.length} {unit}
 					{#if view.blanks.length < exercise.num_blanks}
 						<span class="muted">(version courte sur {exercise.num_blanks} possibles)</span>
 					{/if}
@@ -359,7 +395,20 @@
 				</div>
 			{/if}
 
-			{#if ruleType === 'qcm'}
+			{#if ruleType === 'span'}
+				<p class="consigne">{view.text}</p>
+				<div class="card">
+					<SpanSelectList items={view.blanks} bind:responses />
+				</div>
+			{:else if ruleType === 'punctuation'}
+				<p class="consigne">
+					Ce texte a perdu sa ponctuation : remets les points, les virgules, les points
+					d'interrogation et les points d'exclamation.
+				</p>
+				<div class="card">
+					<PunctuationText {words} bind:responses />
+				</div>
+			{:else if ruleType === 'qcm'}
 				<p class="consigne">
 					{hardActive && rule.config?.hard_consigne ? rule.config.hard_consigne : view.text}
 				</p>
@@ -402,7 +451,13 @@
 				</button>
 				{#if !allFilled}
 					<span class="muted">
-						{ruleType === 'qcm' ? 'Réponds à toutes les questions pour valider.' : 'Remplis tous les trous pour valider.'}
+						{ruleType === 'qcm'
+							? 'Réponds à toutes les questions pour valider.'
+							: ruleType === 'span'
+								? 'Choisis des mots dans chaque phrase pour valider.'
+								: isPunct
+									? 'Place au moins un signe pour valider.'
+									: 'Remplis tous les trous pour valider.'}
 					</span>
 				{/if}
 				{#if submitError}
@@ -414,6 +469,27 @@
 </section>
 
 <style>
+	.legend {
+		margin-top: var(--space-3, 12px);
+	}
+	.lg-right,
+	.lg-wrong,
+	.lg-missed {
+		font-weight: 700;
+		padding: 0 3px;
+	}
+	.lg-right {
+		color: var(--color-success);
+	}
+	.lg-wrong {
+		color: var(--color-error);
+		text-decoration: line-through;
+	}
+	.lg-missed {
+		color: var(--color-success);
+		background: rgba(46, 139, 87, 0.15);
+		border-radius: 3px;
+	}
 	.explanations {
 		list-style: none;
 		margin: 0;

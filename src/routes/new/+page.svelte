@@ -14,7 +14,7 @@
 		id: string;
 		display_name: string;
 		short_description: string;
-		rule_type: 'multiple_choice' | 'free_text' | 'qcm';
+		rule_type: 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation';
 		category: string;
 		config: { generator?: string } | null;
 	}
@@ -127,7 +127,18 @@
 	const selectedRule = $derived(rules.find((r) => r.id === ruleId) ?? null);
 	// La liste de verbes (groupes) est tirée au sort : pas de thème, pas d'IA.
 	const needsTheme = $derived(selectedRule?.config?.generator !== 'verb_groups');
-	const unitLabel = $derived(selectedRule?.rule_type === 'qcm' ? 'questions' : 'trous');
+	const unitLabel = $derived(unitOf(selectedRule?.rule_type));
+	// Ponctuation : un texte de 15 phrases au plus.
+	const maxCount = $derived(selectedRule?.rule_type === 'punctuation' ? 15 : 30);
+	$effect(() => {
+		if (numBlanks > maxCount) numBlanks = maxCount;
+	});
+
+	function unitOf(type: string | undefined): string {
+		if (type === 'qcm') return 'questions';
+		if (type === 'span' || type === 'punctuation') return 'phrases';
+		return 'trous';
+	}
 	const rulesByCategory = $derived(
 		CATEGORIES.map((c) => ({
 			...c,
@@ -255,7 +266,7 @@
 				<label for="num">
 					Nombre de {unitLabel} : <strong>{numBlanks}</strong>
 				</label>
-				<input id="num" type="range" min="3" max="30" bind:value={numBlanks} />
+				<input id="num" type="range" min="3" max={maxCount} bind:value={numBlanks} />
 			</div>
 
 			<button type="submit" disabled={submitting || (needsTheme && !theme.trim())}>
@@ -304,16 +315,16 @@
 							</div>
 							<div class="muted past-sub">
 								{ex.num_blanks}
-								{ex.rule?.rule_type === 'qcm' ? 'questions' : 'trous'} · {ex.grade_level} ·
+								{ex.rule?.rule_type === 'punctuation' ? 'signes' : unitOf(ex.rule?.rule_type)} · {ex.grade_level} ·
 								{formatDate(ex.created_at)}
 							</div>
 						</div>
 						<div class="past-controls">
-							{#if ex.num_blanks > minBlanks}
+							{#if ex.num_blanks > minBlanks && ex.rule?.rule_type !== 'punctuation'}
 								<label class="trous-picker">
 									<span
 										>Faire <strong>{selected}</strong>/{ex.num_blanks}
-										{ex.rule?.rule_type === 'qcm' ? 'questions' : 'trous'}</span
+										{unitOf(ex.rule?.rule_type)}</span
 									>
 									<input
 										type="range"
