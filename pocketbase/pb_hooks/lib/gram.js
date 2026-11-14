@@ -158,7 +158,10 @@ function llmConfig() {
 	return {
 		apiKey: env('LLM_API_KEY', ''),
 		baseUrl: env('LLM_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, ''),
-		model: env('LLM_MODEL', 'gemini-2.0-flash')
+		model: env('LLM_MODEL', 'gemini-2.0-flash'),
+		// Secondes. À relever pour un backend lent (ex. claude -p via claude-bridge).
+		timeoutGenerate: parseInt(env('LLM_TIMEOUT_GENERATE', '90'), 10) || 90,
+		timeoutAppreciation: parseInt(env('LLM_TIMEOUT_APPRECIATION', '45'), 10) || 45
 	};
 }
 
@@ -318,7 +321,7 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 			temperature: 0.7,
 			max_tokens: 2000
 		},
-		90
+		cfg.timeoutGenerate
 	);
 
 	const toolCall = json && json.choices && json.choices[0] && json.choices[0].message &&
@@ -381,7 +384,7 @@ Ton attendu : ${toneHint}
 	const json = chatCompletion(
 		cfg,
 		{ messages: [{ role: 'user', content: userPrompt }], temperature: 0.7, max_tokens: 400 },
-		45
+		cfg.timeoutAppreciation
 	);
 	const text = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
 	if (typeof text !== 'string' || !text.trim()) throw new Error('Pas de contenu textuel dans la réponse.');
