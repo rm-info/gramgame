@@ -190,11 +190,12 @@ function chatCompletion(cfg, payload, timeoutSec) {
 	return res.json;
 }
 
-function validateGenerateRequest(b) {
+function validateGenerateRequest(b, opts) {
+	const needTheme = !opts || opts.needTheme !== false;
 	if (!b || typeof b !== 'object') return 'Corps de requête invalide.';
 	if (typeof b.rule_id !== 'string' || !b.rule_id) return 'rule_id requis.';
-	if (typeof b.theme !== 'string' || b.theme.trim().length < 2) return 'theme invalide.';
-	if (b.theme.length > 500) return 'theme trop long.';
+	if (needTheme && (typeof b.theme !== 'string' || b.theme.trim().length < 2)) return 'theme invalide.';
+	if (typeof b.theme === 'string' && b.theme.length > 500) return 'theme trop long.';
 	if (typeof b.grade_level !== 'string' || !b.grade_level) return 'grade_level requis.';
 	if (typeof b.num_blanks !== 'number' || b.num_blanks < 3 || b.num_blanks > 30) {
 		return 'num_blanks doit être entre 3 et 30.';
@@ -409,6 +410,11 @@ Réponds UNIQUEMENT en appelant le tool submit_exercise.`;
 		cfg.timeoutGenerate
 	);
 
+	return parseToolCall(json);
+}
+
+/** Arguments JSON du premier tool_call d'une réponse chat/completions. */
+function parseToolCall(json) {
 	const toolCall = json && json.choices && json.choices[0] && json.choices[0].message &&
 		json.choices[0].message.tool_calls && json.choices[0].message.tool_calls[0];
 	if (!toolCall) throw new Error('Pas de tool_call dans la réponse LLM.');
@@ -464,6 +470,10 @@ function generateAppreciation(cfg, exercise, rule, grading) {
 	else if (ratio >= 0.5) toneHint = 'Score moyen — encourage et donne une astuce courte sur la règle.';
 	else toneHint = 'Score faible — rassure, propose une astuce simple et concrète sur la règle.';
 
+	const exerciseKind = {
+		qcm: 'un QCM',
+		free_text: 'un exercice de conjugaison à compléter au clavier'
+	}[rule.rule_type] || 'un exercice à trous';
 	const weakGroups = Object.entries(grading.per_group_breakdown || {})
 		.filter(([, v]) => v.ok < v.total)
 		.map(([label, v]) => `${label} (${v.ok}/${v.total})`)
@@ -471,14 +481,18 @@ function generateAppreciation(cfg, exercise, rule, grading) {
 
 	const errorsList = grading.per_blank
 		.filter((b) => !b.ok)
-		.map((b) => `position ${b.position} : a écrit "${b.given ?? '(rien)'}" au lieu de "${b.correct}"`)
+		.map((b) =>
+			b.context
+				? `${b.context} : a répondu "${b.given ?? '(rien)'}" au lieu de "${b.correct}"`
+				: `position ${b.position} : a écrit "${b.given ?? '(rien)'}" au lieu de "${b.correct}"`
+		)
 		.slice(0, 6)
 		.join(' ; ');
 
-	const userPrompt = `Tu donnes un retour personnalisé à un élève de ${exercise.grade_level} qui vient de faire un exercice à trous sur la règle "${rule.display_name}" (${rule.short_description}).
+	const userPrompt = `Tu donnes un retour personnalisé à un élève de ${exercise.grade_level} qui vient de faire ${exerciseKind} sur la règle "${rule.display_name}" (${rule.short_description}).
 
 Score : ${grading.score}/${grading.score_total}.
-${errorsList ? `Erreurs : ${errorsList}.` : 'Aucune erreur.'}${weakGroups ? `\nConfusions à retravailler : ${weakGroups}. Centre ton astuce sur la plus ratée.` : ''}
+${errorsList ? `Erreurs : ${errorsList}.` : 'Aucune erreur.'}${weakGroups ? `\nPoints à retravailler : ${weakGroups}. Centre ton astuce sur la plus ratée.` : ''}
 Ton attendu : ${toneHint}
 
 Écris UNE SEULE appréciation courte (3-5 phrases maximum), en français, ton bienveillant et encourageant. Tutoie l'élève. Si pertinent, glisse une astuce mémo pour la règle (ex : « où prend un accent quand il indique un lieu ; ou ne sert qu'à donner le choix »). Pas de formule mécanique, sois naturel. Réponds uniquement avec l'appréciation, sans préambule.`;
@@ -530,6 +544,8 @@ module.exports = {
 	llmConfig,
 	validateGenerateRequest,
 	validateExercise,
+	chatCompletion,
+	parseToolCall,
 	normalizeWord,
 	ruleGroups,
 	validateRuleGroups,

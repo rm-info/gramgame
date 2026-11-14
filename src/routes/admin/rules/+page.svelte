@@ -5,7 +5,19 @@
 	import { normalizeWord, parseGroupsText, groupsToText, groupLabel } from '$lib/confusion';
 	import { activeUsername } from '$lib/active-username.svelte';
 
-	type RuleType = 'multiple_choice' | 'free_text';
+	type RuleType = 'multiple_choice' | 'free_text' | 'qcm';
+
+	const TYPE_LABELS: Record<RuleType, string> = {
+		multiple_choice: 'texte à trous + menu',
+		free_text: 'texte à trous au clavier',
+		qcm: 'QCM'
+	};
+	const CATEGORY_LABELS: Record<string, string> = {
+		orthographe: 'Orthographe',
+		grammaire: 'Grammaire',
+		conjugaison: 'Conjugaison'
+	};
+	const GENERATORS = ['verb_groups', 'llm_qcm', 'conj_present'];
 
 	interface RuleExample {
 		sentence: string;
@@ -18,6 +30,8 @@
 		display_name: string;
 		short_description: string;
 		rule_type: RuleType;
+		category: string;
+		config: Record<string, unknown> | null;
 		candidates: string[];
 		groups: string[][] | null;
 		difficulty_hint: string | null;
@@ -31,6 +45,9 @@
 		display_name: string;
 		short_description: string;
 		rule_type: RuleType;
+		category: string;
+		/** Configuration JSON (types QCM / saisie) */
+		configText: string;
 		candidates: string[];
 		/** Une ligne par groupe de confusion : « on / ont » */
 		groupsText: string;
@@ -68,10 +85,12 @@
 			const data = await pb.collection('rules').getFullList({
 				sort: 'id',
 				fields:
-					'id,display_name,short_description,rule_type,candidates,groups,difficulty_hint,examples'
+					'id,display_name,short_description,rule_type,category,config,candidates,groups,difficulty_hint,examples'
 			});
 			rules = data.map((r) => ({
 				...(r as unknown as Rule),
+				candidates: Array.isArray(r.candidates) ? r.candidates : [],
+				config: r.config && typeof r.config === 'object' ? r.config : null,
 				groups: Array.isArray(r.groups) && r.groups.length > 0 ? r.groups : null,
 				difficulty_hint: r.difficulty_hint || null,
 				examples: Array.isArray(r.examples) ? r.examples : null
@@ -90,6 +109,8 @@
 			display_name: '',
 			short_description: '',
 			rule_type: 'multiple_choice',
+			category: 'orthographe',
+			configText: '',
 			candidates: [],
 			groupsText: '',
 			difficulty_hint: '',
@@ -112,6 +133,8 @@
 			display_name: r.display_name,
 			short_description: r.short_description,
 			rule_type: r.rule_type,
+			category: r.category ?? '',
+			configText: r.config && Object.keys(r.config).length ? JSON.stringify(r.config, null, 2) : '',
 			candidates: [...r.candidates],
 			groupsText: groupsToText(r.groups),
 			difficulty_hint: r.difficulty_hint ?? '',
@@ -130,6 +153,8 @@
 			display_name: `${r.display_name} (copie)`,
 			short_description: r.short_description,
 			rule_type: r.rule_type,
+			category: r.category ?? '',
+			configText: r.config && Object.keys(r.config).length ? JSON.stringify(r.config, null, 2) : '',
 			candidates: [...r.candidates],
 			groupsText: groupsToText(r.groups),
 			difficulty_hint: r.difficulty_hint ?? '',
@@ -198,6 +223,17 @@
 		return null;
 	}
 
+	/** null si vide, undefined si JSON invalide. */
+	function parseConfig(text: string): Record<string, unknown> | null | undefined {
+		if (!text.trim()) return null;
+		try {
+			const v = JSON.parse(text);
+			return v && typeof v === 'object' && !Array.isArray(v) ? v : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
 	function validateForm(): string | null {
 		if (!form) return 'Pas de formulaire actif.';
 		if (!/^[a-z0-9-]+$/.test(form.id)) {
@@ -206,11 +242,15 @@
 		if (form.id.length < 2) return 'ID trop court.';
 		if (!form.display_name.trim()) return 'Nom d\'affichage requis.';
 		if (!form.short_description.trim()) return 'Description requise.';
-		if (form.candidates.length < 2) {
-			return 'Il faut au moins 2 candidats.';
+		if (form.rule_type !== 'free_text' && form.candidates.length < 2) {
+			return 'Il faut au moins 2 candidats (les réponses possibles).';
 		}
 		if (form.rule_type !== 'multiple_choice') {
-			return 'Seul le type "multiple_choice" est implémenté pour l\'instant.';
+			const cfg = parseConfig(form.configText);
+			if (cfg === undefined) return 'Configuration : JSON invalide.';
+			if (!cfg || !GENERATORS.includes(String(cfg.generator))) {
+				return `Configuration : « generator » doit valoir ${GENERATORS.join(', ')}.`;
+			}
 		}
 		const groupsError = validateGroups(form.candidates, parseGroupsText(form.groupsText));
 		if (groupsError) return groupsError;
@@ -239,8 +279,11 @@
 			display_name: form.display_name.trim(),
 			short_description: form.short_description.trim(),
 			rule_type: form.rule_type,
-			candidates: form.candidates,
+			category: form.category || null,
+			config: form.rule_type === 'multiple_choice' ? null : parseConfig(form.configText),
+			candidates: form.rule_type === 'free_text' ? null : form.candidates,
 			groups: (() => {
+				if (form.rule_type !== 'multiple_choice') return null;
 				const g = parseGroupsText(form.groupsText);
 				return g.length > 0 ? g : null;
 			})(),
@@ -316,10 +359,12 @@
 		<a href={`${base}/admin`} class="back">← Retour à la gestion</a>
 		<h1>Règles de grammaire</h1>
 		<p class="muted">
-			Catalogue des règles que les utilisateurs peuvent pratiquer. Pour le MVP, seul le type
-			<code>multiple_choice</code> est exploité par le moteur de génération (homophones binaires :
-			ou/où, a/à, et/est, etc.). Le type <code>free_text</code> est prévu pour les futures règles
-			à champ libre (accords, conjugaison) mais pas encore implémenté.
+			Catalogue des notions que les utilisateurs peuvent pratiquer. Trois types d'exercices :
+			<strong>texte à trous + menu</strong> (homophones), <strong>texte à trous au clavier</strong>
+			(conjugaison, accord : réponses calculées par le serveur) et <strong>QCM</strong> (une
+			question par phrase). Pour les deux derniers, la configuration JSON indique comment générer
+			l'exercice (<code>generator</code> : {GENERATORS.join(', ')}) ; le plus simple est de
+			dupliquer une règle existante.
 		</p>
 	</header>
 
@@ -379,18 +424,52 @@
 				<label>
 					<span>Type</span>
 					<select bind:value={form.rule_type}>
-						<option value="multiple_choice">multiple_choice (homophones binaires)</option>
-						<option value="free_text" disabled>free_text (à venir)</option>
+						{#each Object.entries(TYPE_LABELS) as [value, label] (value)}
+							<option {value}>{label}</option>
+						{/each}
 					</select>
 				</label>
+
+				<label>
+					<span>Catégorie</span>
+					<select bind:value={form.category}>
+						<option value="">—</option>
+						{#each Object.entries(CATEGORY_LABELS) as [value, label] (value)}
+							<option {value}>{label}</option>
+						{/each}
+					</select>
+				</label>
+
+				{#if form.rule_type !== 'multiple_choice'}
+					<label class="full">
+						<span>Configuration (JSON)</span>
+						<textarea
+							rows="4"
+							class="mono"
+							bind:value={form.configText}
+							placeholder={'{ "generator": "llm_qcm", "highlight": true }'}
+						></textarea>
+						<span class="muted small">
+							<code>verb_groups</code> : liste de verbes tirée au sort (sans IA) ·
+							<code>llm_qcm</code> : phrases écrites par l'IA (<code>check</code> :
+							<code>proche</code> | <code>pronom</code> pour vérifier ses réponses,
+							<code>highlight</code>, <code>balance</code>) · <code>conj_present</code> : verbes et
+							personnes choisis par le serveur, réponses calculées (<code>pool</code> :
+							<code>present</code> | <code>eter_eler</code> | <code>accord</code>).
+						</span>
+					</label>
+				{/if}
 
 				<label>
 					<span>Niveau scolaire indicatif</span>
 					<input type="text" bind:value={form.difficulty_hint} placeholder="CE2" />
 				</label>
 
+				{#if form.rule_type !== 'free_text'}
 				<div class="full">
-					<span class="label-text">Candidats (les valeurs possibles)</span>
+					<span class="label-text">
+						{form.rule_type === 'qcm' ? 'Réponses possibles' : 'Candidats (les valeurs possibles)'}
+					</span>
 					<div class="chips">
 						{#each form.candidates as c (c)}
 							<span class="chip">
@@ -409,9 +488,11 @@
 							placeholder="Tape puis Entrée"
 						/>
 					</div>
-					<span class="muted small">2 candidats minimum. Pour les homophones binaires : exactement 2.</span>
+					<span class="muted small">2 minimum.</span>
 				</div>
+				{/if}
 
+				{#if form.rule_type === 'multiple_choice'}
 				<label class="full">
 					<span class="label-text">Groupes de confusion (optionnel)</span>
 					<textarea
@@ -425,7 +506,9 @@
 						groupe ; en mode difficile, tous les candidats. Vide = un seul groupe (tous les candidats).
 					</span>
 				</label>
+				{/if}
 
+				{#if form.rule_type !== 'free_text'}
 				<div class="full">
 					<div class="row-between">
 						<span class="label-text">Exemples positifs (phrases où la règle s'applique)</span>
@@ -464,6 +547,7 @@
 						Utilise <code>{`{{?}}`}</code> à la position du mot à deviner dans la phrase.
 					</p>
 				</div>
+				{/if}
 			</div>
 
 			<div class="form-actions">
@@ -497,14 +581,19 @@
 							<div class="rule-title">
 								<strong>{r.display_name}</strong>
 								<code class="rule-id">{r.id}</code>
-								<span class="rule-type">{r.rule_type}</span>
+								<span class="rule-type">{TYPE_LABELS[r.rule_type] ?? r.rule_type}</span>
+								{#if r.category}
+									<span class="rule-type">{CATEGORY_LABELS[r.category] ?? r.category}</span>
+								{/if}
 							</div>
 							<div class="muted rule-desc">{r.short_description}</div>
 							<div class="muted small">
 								{#if r.groups}
 									Confusions : {r.groups.map(groupLabel).join(' · ')}
+								{:else if r.candidates.length}
+									{r.rule_type === 'qcm' ? 'Réponses' : 'Candidats'} : {r.candidates.join(', ')}
 								{:else}
-									Candidats : {r.candidates.join(', ')}
+									Réponses calculées par le serveur
 								{/if}
 								{#if r.difficulty_hint}
 									· Niveau : {r.difficulty_hint}
@@ -539,6 +628,10 @@
 </section>
 
 <style>
+	.mono {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.9em;
+	}
 	.back {
 		font-size: 0.9em;
 	}

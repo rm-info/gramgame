@@ -5,11 +5,44 @@ import type { RecordModel } from 'pocketbase';
  * (noms de champs historiques : rule_id, created_at, created_by_username…).
  */
 
+export type RuleType = 'multiple_choice' | 'free_text' | 'qcm';
+
+export interface RuleConfig {
+	generator?: 'verb_groups' | 'llm_qcm' | 'conj_present';
+	check?: string;
+	highlight?: boolean;
+	balance?: boolean;
+	pool?: string;
+	focus?: string;
+}
+
+/**
+ * Un trou (texte à trous) ou une question (QCM).
+ *  - multiple_choice : position, correct
+ *  - free_text       : + verb, person, subject, accepted (formes acceptées)
+ *  - qcm             : + prompt (phrase, [[ ]] = passage en surbrillance), explanation
+ */
 export interface BlankRow {
 	position: number;
 	correct: string;
 	/** Ancien format (avant les groupes de confusion) — ignoré. */
 	distractor?: string;
+	prompt?: string;
+	explanation?: string;
+	accepted?: string[];
+	verb?: string;
+	person?: string;
+	subject?: string;
+	category?: string;
+}
+
+export interface RuleInfo {
+	id: string;
+	display_name: string;
+	rule_type: RuleType;
+	candidates: string[];
+	groups: string[][] | null;
+	config: RuleConfig;
 }
 
 export interface ExerciseRow {
@@ -26,7 +59,7 @@ export interface ExerciseRow {
 	verified: boolean;
 	verified_at: string | null;
 	verified_by_username: string | null;
-	rule: { id: string; display_name: string; candidates: string[]; groups: string[][] | null } | null;
+	rule: RuleInfo | null;
 }
 
 export function mapExercise(r: RecordModel): ExerciseRow {
@@ -49,8 +82,10 @@ export function mapExercise(r: RecordModel): ExerciseRow {
 			? {
 					id: rule.id,
 					display_name: rule.display_name,
+					rule_type: (rule.rule_type || 'multiple_choice') as RuleType,
 					candidates: Array.isArray(rule.candidates) ? rule.candidates : [],
-					groups: Array.isArray(rule.groups) ? rule.groups : null
+					groups: Array.isArray(rule.groups) ? rule.groups : null,
+					config: rule.config && typeof rule.config === 'object' ? rule.config : {}
 				}
 			: null
 	};
@@ -73,4 +108,28 @@ export function mapAttempt(r: RecordModel): AttemptRow {
 		completed_at: r.created,
 		exercise: ex ? mapExercise(ex) : null
 	};
+}
+
+export const PERSON_LABELS: Record<string, string> = {
+	'1s': 'je',
+	'2s': 'tu',
+	'3s': 'il / elle',
+	'1p': 'nous',
+	'2p': 'vous',
+	'3p': 'ils / elles'
+};
+
+/** Découpe « Le [[chien]] dort » en segments, le passage [[…]] étant marqué. */
+export function highlightSegments(prompt: string): { text: string; mark: boolean }[] {
+	const out: { text: string; mark: boolean }[] = [];
+	const re = /\[\[([^\]]+)\]\]/g;
+	let last = 0;
+	for (const m of prompt.matchAll(re)) {
+		const idx = m.index ?? 0;
+		if (idx > last) out.push({ text: prompt.slice(last, idx), mark: false });
+		out.push({ text: m[1], mark: true });
+		last = idx + m[0].length;
+	}
+	if (last < prompt.length) out.push({ text: prompt.slice(last), mark: false });
+	return out;
 }

@@ -3,20 +3,16 @@
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import { pb, errorMessage } from '$lib/pb';
-	import { mapExercise, type ExerciseRow } from '$lib/data';
+	import { mapExercise, type ExerciseRow, type BlankRow, type RuleInfo } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import ExerciseText from '$lib/components/ExerciseText.svelte';
+	import QcmList from '$lib/components/QcmList.svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { correctAttempt, type CorrectionResult } from '$lib/api/correct';
 	import { truncateExercise } from '$lib/truncate-exercise';
 	import { hasSeveralGroups, optionsForBlank, ruleGroups, groupLabel } from '$lib/confusion';
 
 	const HARD_MODE_KEY = 'gramgame.hard_mode';
-
-	interface BlankRow {
-		position: number;
-		correct: string;
-	}
 
 	interface ExerciseData {
 		id: string;
@@ -31,15 +27,9 @@
 		verified_by_username: string | null;
 	}
 
-	interface RuleData {
-		id: string;
-		display_name: string;
-		candidates: string[];
-		groups: string[][] | null;
-	}
-
 	let exercise = $state<ExerciseData | null>(null);
-	let rule = $state<RuleData | null>(null);
+	let rule = $state<RuleInfo | null>(null);
+	const ruleType = $derived(rule?.rule_type ?? 'multiple_choice');
 	let loadError = $state<string | null>(null);
 	let loading = $state(true);
 
@@ -51,7 +41,9 @@
 	// Mode difficile : chaque trou propose tous les mots de la règle au lieu
 	// du seul groupe de confusion concerné. Mémorisé d'un exercice à l'autre.
 	let hardMode = $state(readHardMode());
-	const severalGroups = $derived(rule ? hasSeveralGroups(rule) : false);
+	const severalGroups = $derived(
+		rule && rule.rule_type === 'multiple_choice' ? hasSeveralGroups(rule) : false
+	);
 	// Verrouillé dès la première réponse (sinon on pourrait « tricher » en
 	// passant en mode normal pour voir le groupe, puis revenir).
 	const hardModeLocked = $derived(Object.values(responses).some((v) => v !== null));
@@ -79,6 +71,19 @@
 		return optionsForBlank(rule, blank?.correct ?? '', hardMode && severalGroups);
 	}
 
+	// Saisie au clavier : l'infinitif du verbe (et la personne si le sujet est
+	// un groupe nominal, pour l'accord) est affiché à côté du champ.
+	function hintFor(position: number): string {
+		const blank = exercise?.blanks.find((b) => b.position === position);
+		return blank?.verb ?? '';
+	}
+
+	const unit = $derived(ruleType === 'qcm' ? 'questions' : 'trous');
+
+	function filled(v: string | null | undefined) {
+		return v !== null && v !== undefined && v.trim() !== '';
+	}
+
 	const exerciseId = $derived(page.params.id);
 	const maxParam = $derived(Number(page.url.searchParams.get('max')) || 0);
 
@@ -87,12 +92,17 @@
 		if (!exercise) return null;
 		const requested = maxParam > 0 ? maxParam : exercise.num_blanks;
 		const effective = Math.max(1, Math.min(requested, exercise.num_blanks));
+		// QCM : on garde simplement les N premières questions.
+		if (ruleType === 'qcm') {
+			const sorted = [...exercise.blanks].sort((a, b) => a.position - b.position);
+			return { text: exercise.text, blanks: sorted.slice(0, effective) };
+		}
 		return truncateExercise(exercise.text, exercise.blanks, effective);
 	});
 
 	const blankPositions = $derived(view?.blanks.map((b) => b.position) ?? []);
 	const allFilled = $derived(
-		view && blankPositions.every((p) => responses[p] !== null && responses[p] !== undefined)
+		view && blankPositions.every((p) => filled(responses[p]))
 	);
 
 	onMount(async () => {
@@ -130,8 +140,8 @@
 		const keptPositions = new Set(view.blanks.map((b) => b.position));
 		const payload: Record<string, string> = {};
 		for (const [pos, val] of Object.entries(responses)) {
-			if (val !== null && keptPositions.has(Number(pos))) {
-				payload[pos] = val;
+			if (filled(val) && keptPositions.has(Number(pos))) {
+				payload[pos] = (val as string).trim();
 			}
 		}
 
@@ -164,22 +174,37 @@
 				{result}
 				ruleId={exercise.rule_id}
 				ruleName={rule.display_name}
+				breakdownTitle={ruleType === 'multiple_choice' ? undefined : 'Détail'}
 				theme={exercise.theme}
 				gradeLevel={exercise.grade_level}
 				numBlanks={view.blanks.length}
 			/>
 
 			<details class="card">
-				<summary>Voir le texte avec les corrections</summary>
+				<summary>
+					{ruleType === 'qcm' ? 'Voir les corrections' : 'Voir le texte avec les corrections'}
+				</summary>
 				<div style="margin-top: var(--space-4);">
-					<ExerciseText
-						text={view.text}
-						blankPositions={view.blanks.map((b) => b.position)}
-						{optionsFor}
-						bind:responses
-						readonly
-						results={result.per_blank}
-					/>
+					{#if ruleType === 'qcm'}
+						<QcmList
+							items={view.blanks}
+							options={rule.candidates}
+							bind:responses
+							readonly
+							results={result.per_blank}
+						/>
+					{:else}
+						<ExerciseText
+							text={view.text}
+							blankPositions={view.blanks.map((b) => b.position)}
+							mode={ruleType === 'free_text' ? 'input' : 'select'}
+							{optionsFor}
+							{hintFor}
+							bind:responses
+							readonly
+							results={result.per_blank}
+						/>
+					{/if}
 				</div>
 			</details>
 		{:else}
@@ -204,7 +229,7 @@
 				</div>
 				<p class="muted">
 					Thème : <em>{exercise.theme}</em> · Niveau : {exercise.grade_level} ·
-					{view.blanks.length} trous
+					{view.blanks.length} {unit}
 					{#if view.blanks.length < exercise.num_blanks}
 						<span class="muted">(version courte sur {exercise.num_blanks} possibles)</span>
 					{/if}
@@ -239,20 +264,33 @@
 				</div>
 			{/if}
 
-			<div class="card">
-				<ExerciseText
-					text={view.text}
-					{blankPositions}
-					{optionsFor}
-					bind:responses
-				/>
-			</div>
+			{#if ruleType === 'qcm'}
+				<p class="consigne">{view.text}</p>
+				<div class="card">
+					<QcmList items={view.blanks} options={rule.candidates} bind:responses />
+				</div>
+			{:else}
+				{#if ruleType === 'free_text'}
+					<p class="consigne">
+						Écris chaque verbe entre parenthèses au <strong>présent</strong>, accordé avec son sujet.
+					</p>
+				{/if}
+				<div class="card">
+					<ExerciseText
+						text={view.text}
+						{blankPositions}
+						mode={ruleType === 'free_text' ? 'input' : 'select'}
+						{optionsFor}
+						{hintFor}
+						bind:responses
+					/>
+				</div>
+			{/if}
 
 			{#if view.blanks.length < exercise.num_blanks}
 				<aside class="truncation-note">
-					💡 Tu fais une version courte de cet exercice. Pour lire l'histoire en entier, lance-le
-					avec ses <strong>{exercise.num_blanks} trous</strong> complets depuis la page « Nouvel
-					exercice ».
+					💡 Tu fais une version courte de cet exercice. Pour le faire en entier, lance-le avec ses
+					<strong>{exercise.num_blanks} {unit}</strong> depuis la page « Nouvel exercice ».
 				</aside>
 			{/if}
 
@@ -261,7 +299,9 @@
 					{submitting ? 'Correction en cours…' : "J'ai terminé"}
 				</button>
 				{#if !allFilled}
-					<span class="muted">Remplis tous les trous pour valider.</span>
+					<span class="muted">
+						{ruleType === 'qcm' ? 'Réponds à toutes les questions pour valider.' : 'Remplis tous les trous pour valider.'}
+					</span>
 				{/if}
 				{#if submitError}
 					<p class="error">{submitError}</p>
@@ -272,6 +312,10 @@
 </section>
 
 <style>
+	.consigne {
+		margin: 0;
+		font-weight: 500;
+	}
 	.mode-row {
 		display: flex;
 		flex-direction: column;

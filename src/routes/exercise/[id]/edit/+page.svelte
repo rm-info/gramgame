@@ -4,14 +4,12 @@
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
 	import { pb, errorMessage } from '$lib/pb';
-	import { mapExercise, type ExerciseRow } from '$lib/data';
+	import { mapExercise, PERSON_LABELS, type ExerciseRow, type BlankRow, type RuleInfo } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { ruleGroups, groupLabel } from '$lib/confusion';
 
-	interface BlankRow {
-		position: number;
-		correct: string;
-	}
+	/** Ligne éditable : pour la saisie au clavier, les réponses acceptées en texte. */
+	type EditRow = BlankRow & { accepted_text?: string };
 
 	interface ExerciseData {
 		id: string;
@@ -26,28 +24,39 @@
 		verified_by_username: string | null;
 	}
 
-	interface RuleData {
-		id: string;
-		display_name: string;
-		candidates: string[];
-		groups: string[][] | null;
-	}
-
 	let exerciseId = $derived(page.params.id);
 
 	let exercise = $state<ExerciseData | null>(null);
-	let rule = $state<RuleData | null>(null);
+	let rule = $state<RuleInfo | null>(null);
+	const ruleType = $derived(rule?.rule_type ?? 'multiple_choice');
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
 	let editText = $state('');
-	let editBlanks = $state<BlankRow[]>([]);
+	let editBlanks = $state<EditRow[]>([]);
 	let editVerified = $state(false);
 	let saving = $state(false);
 	let saveMsg = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
 
 	const validation = $derived.by(() => {
+		if (ruleType === 'qcm') {
+			const incomplete = editBlanks
+				.filter((b) => !(b.prompt ?? '').trim() || !(rule?.candidates ?? []).includes(b.correct))
+				.map((b) => b.position);
+			return {
+				markerCount: 0,
+				blankCount: editBlanks.length,
+				markersWithoutBlank: [] as number[],
+				blanksWithoutMarker: [] as number[],
+				incomplete,
+				ok: editBlanks.length > 0 && incomplete.length === 0
+			};
+		}
+		const incomplete =
+			ruleType === 'free_text'
+				? editBlanks.filter((b) => parseAccepted(b.accepted_text).length === 0).map((b) => b.position)
+				: [];
 		const matches = [...editText.matchAll(/\{\{(\d+)\}\}/g)];
 		const markerPositions = new Set(matches.map((m) => Number(m[1])));
 		const blankPositions = new Set(editBlanks.map((b) => b.position));
@@ -58,9 +67,11 @@
 			blankCount: blankPositions.size,
 			markersWithoutBlank,
 			blanksWithoutMarker,
+			incomplete,
 			ok:
 				markersWithoutBlank.length === 0 &&
 				blanksWithoutMarker.length === 0 &&
+				incomplete.length === 0 &&
 				editBlanks.length > 0
 		};
 	});
@@ -79,10 +90,16 @@
 		}
 		exercise = ex as ExerciseData;
 		editText = exercise.text;
-		// On ne garde que position + bonne réponse (l'ancien champ distractor
-		// est abandonné : les options viennent des groupes de la règle).
+		const type = ex.rule?.rule_type ?? 'multiple_choice';
 		editBlanks = exercise.blanks
-			.map((b) => ({ position: b.position, correct: b.correct }))
+			.map((b): EditRow => {
+				if (type === 'free_text') {
+					return { ...b, accepted_text: (b.accepted?.length ? b.accepted : [b.correct]).join(', ') };
+				}
+				if (type === 'qcm') return { ...b };
+				// L'ancien champ distractor est abandonné : les options viennent des groupes.
+				return { position: b.position, correct: b.correct };
+			})
 			.sort((a, b) => a.position - b.position);
 		editVerified = exercise.verified;
 
@@ -100,9 +117,41 @@
 		let pos = 1;
 		while (usedPositions.has(pos)) pos++;
 		const cands = rule?.candidates ?? [];
-		editBlanks = [...editBlanks, { position: pos, correct: cands[0] ?? '' }].sort(
-			(a, b) => a.position - b.position
-		);
+		let row: EditRow = { position: pos, correct: cands[0] ?? '' };
+		if (ruleType === 'free_text') row = { position: pos, correct: '', verb: '', person: '3s', accepted_text: '' };
+		if (ruleType === 'qcm') {
+			const next = Math.max(0, ...editBlanks.map((b) => b.position)) + 1;
+			row = { position: next, prompt: '', correct: cands[0] ?? '', explanation: '' };
+		}
+		editBlanks = [...editBlanks, row].sort((a, b) => a.position - b.position);
+	}
+
+	function parseAccepted(text: string | undefined): string[] {
+		return (text ?? '')
+			.split(',')
+			.map((w) => w.trim())
+			.filter(Boolean);
+	}
+
+	/** Lignes éditées → format stocké. */
+	function blanksForSave(): BlankRow[] {
+		if (ruleType === 'free_text') {
+			return editBlanks.map(({ accepted_text, ...b }) => {
+				const accepted = parseAccepted(accepted_text);
+				return { ...b, accepted, correct: accepted[0] ?? '' };
+			});
+		}
+		if (ruleType === 'qcm') {
+			// Questions renumérotées dans l'ordre affiché.
+			return editBlanks.map((b, i) => ({
+				...b,
+				position: i + 1,
+				prompt: (b.prompt ?? '').trim(),
+				explanation: (b.explanation ?? '').trim(),
+				category: b.correct
+			}));
+		}
+		return editBlanks.map((b) => ({ position: b.position, correct: b.correct }));
 	}
 
 	function removeBlank(position: number) {
@@ -126,7 +175,7 @@
 			updated = mapExercise(
 				await pb.collection('exercises').update(exercise.id, {
 					text: editText,
-					blanks: editBlanks,
+					blanks: blanksForSave(),
 					num_blanks: editBlanks.length,
 					...verificationFields
 				})
@@ -169,6 +218,15 @@
 
 		<div class="editor-grid">
 			<div class="card stack editor-pane editor-pane-text">
+				{#if ruleType === 'qcm'}
+				<label for="text">Consigne affichée à l'élève :</label>
+				<textarea id="text" bind:value={editText} rows="3" class="consigne-input"></textarea>
+				<p class="muted small">
+					Dans chaque question, le passage entre <code>[[ ]]</code> est mis en surbrillance (ex. :
+					<code>[[Le chien des voisins]] aboie.</code>). Réponses possibles :
+					{rule.candidates.join(', ')}.
+				</p>
+				{:else}
 				<label for="text">
 					Texte (les marqueurs <code>{'{{1}}'}</code>, <code>{'{{2}}'}</code>, … indiquent les
 					trous) :
@@ -195,17 +253,97 @@
 						{validation.blanksWithoutMarker.map((p) => `{{${p}}}`).join(', ')}
 					</p>
 				{/if}
+				{/if}
+				{#if validation.incomplete.length > 0}
+					<p class="warning">
+						{ruleType === 'qcm' ? 'Questions incomplètes' : 'Trous sans réponse acceptée'} :
+						{validation.incomplete.join(', ')}
+					</p>
+				{/if}
 			</div>
 
 			<div class="card stack editor-pane editor-pane-blanks">
 				<div class="row-between">
-					<h2>Trous</h2>
-					<button type="button" class="secondary" onclick={addBlank}>+ Ajouter un trou</button>
+					<h2>{ruleType === 'qcm' ? 'Questions' : 'Trous'}</h2>
+					<button type="button" class="secondary" onclick={addBlank}>
+						+ Ajouter {ruleType === 'qcm' ? 'une question' : 'un trou'}
+					</button>
 				</div>
 
 				<div class="blanks-scroll">
 					{#if editBlanks.length === 0}
-						<p class="muted">Aucun trou. Ajoute-en avec le bouton ci-dessus.</p>
+						<p class="muted">Rien pour l'instant. Ajoute-en avec le bouton ci-dessus.</p>
+					{:else if ruleType === 'qcm'}
+						<ol class="qcm-edit">
+							{#each editBlanks as b (b.position)}
+								<li class="stack">
+									<input type="text" bind:value={b.prompt} placeholder="[[Le chien des voisins]] aboie." />
+									<div class="qcm-row">
+										<select bind:value={b.correct} aria-label="Bonne réponse">
+											{#each rule.candidates as c (c)}
+												<option value={c}>{c}</option>
+											{/each}
+										</select>
+										<input
+											type="text"
+											bind:value={b.explanation}
+											placeholder="Explication (montrée après correction)"
+										/>
+										<button
+											type="button"
+											class="link danger"
+											title="Supprimer cette question"
+											onclick={() => removeBlank(b.position)}
+										>
+											✕
+										</button>
+									</div>
+								</li>
+							{/each}
+						</ol>
+					{:else if ruleType === 'free_text'}
+						<p class="muted small">
+							Réponses acceptées séparées par des virgules ; la première est celle montrée en
+							correction (ex. <code>étiquette, étiquète</code> pour accepter l'orthographe
+							rectifiée).
+						</p>
+						<table class="blanks-table">
+							<thead>
+								<tr>
+									<th>Trou</th>
+									<th>Verbe</th>
+									<th>Personne</th>
+									<th>Réponses acceptées</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each editBlanks as b (b.position)}
+									<tr>
+										<td><code>{`{{${b.position}}}`}</code></td>
+										<td><input type="text" class="cell-input" bind:value={b.verb} /></td>
+										<td>
+											<select bind:value={b.person}>
+												{#each Object.entries(PERSON_LABELS) as [code, label] (code)}
+													<option value={code}>{label}</option>
+												{/each}
+											</select>
+										</td>
+										<td><input type="text" class="cell-input wide" bind:value={b.accepted_text} /></td>
+										<td class="actions">
+											<button
+												type="button"
+												class="link danger"
+												title="Supprimer ce trou"
+												onclick={() => removeBlank(b.position)}
+											>
+												✕
+											</button>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
 					{:else}
 						<table class="blanks-table">
 							<thead>
@@ -424,5 +562,36 @@
 	}
 	.small {
 		font-size: 0.9em;
+	}
+	.consigne-input {
+		min-height: 4em;
+	}
+	.cell-input {
+		width: 8em;
+		padding: 4px 6px;
+	}
+	.cell-input.wide {
+		width: 12em;
+	}
+	.qcm-edit {
+		margin: 0;
+		padding-left: 1.4em;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
+	}
+	.qcm-edit .stack {
+		gap: 6px;
+	}
+	.qcm-row {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+	}
+	.qcm-row select {
+		width: auto;
+	}
+	.qcm-row input {
+		flex: 1;
 	}
 </style>
