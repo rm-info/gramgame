@@ -495,7 +495,7 @@ Score : ${grading.score}/${grading.score_total}.
 ${errorsList ? `Erreurs : ${errorsList}.` : 'Aucune erreur.'}${weakGroups ? `\nPoints à retravailler : ${weakGroups}. Centre ton astuce sur la plus ratée.` : ''}
 Ton attendu : ${toneHint}
 
-Écris UNE SEULE appréciation courte (3-5 phrases maximum), en français, ton bienveillant et encourageant. Tutoie l'élève. Si pertinent, glisse une astuce mémo pour la règle (ex : « où prend un accent quand il indique un lieu ; ou ne sert qu'à donner le choix »). Pas de formule mécanique, sois naturel. Réponds uniquement avec l'appréciation, sans préambule.`;
+Écris UNE SEULE appréciation courte (3-5 phrases maximum), en français, ton bienveillant et encourageant. Tutoie l'élève. Si pertinent, glisse une astuce mémo pour la règle (ex : « où prend un accent quand il indique un lieu ; ou ne sert qu'à donner le choix »). Pas de formule mécanique, sois naturel. Texte brut : pas de Markdown (ni astérisques, ni titres, ni listes). Réponds uniquement avec l'appréciation, sans préambule.`;
 
 	const json = chatCompletion(
 		cfg,
@@ -504,7 +504,11 @@ Ton attendu : ${toneHint}
 	);
 	const text = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
 	if (typeof text !== 'string' || !text.trim()) throw new Error('Pas de contenu textuel dans la réponse.');
-	return text.trim();
+	// Affichée en texte brut : on retire le Markdown (gras/italique) si le modèle en met quand même.
+	return text
+		.replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2')
+		.replace(/(^|[^\w*])\*([^*\n]+)\*(?!\w)/g, '$1$2')
+		.trim();
 }
 
 function fallbackAppreciation(g) {
