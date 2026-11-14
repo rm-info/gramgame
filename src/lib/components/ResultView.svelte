@@ -6,12 +6,14 @@
 		result: CorrectionResult;
 		ruleId: string;
 		ruleName?: string;
+		/** Titre du détail quand il y a plusieurs catégories (défaut : « par confusion »). */
+		breakdownTitle?: string;
 		theme: string;
 		gradeLevel: string;
 		numBlanks: number;
 	}
 
-	let { result, ruleId, ruleName, theme, gradeLevel, numBlanks }: Props = $props();
+	let { result, ruleId, ruleName, breakdownTitle, theme, gradeLevel, numBlanks }: Props = $props();
 
 	// Une ligne par confusion si la règle en a plusieurs, sinon une ligne pour la règle.
 	const breakdown = $derived(
@@ -50,7 +52,7 @@
 	</header>
 
 	<section class="stack">
-		<h3>{byGroup ? 'Détail par confusion' : 'Détail par règle'}</h3>
+		<h3>{byGroup ? (breakdownTitle ?? 'Détail par confusion') : 'Détail par règle'}</h3>
 		<ul class="breakdown">
 			{#each breakdown as [rule, { ok, total }] (rule)}
 				{@const ratio = ok / total}

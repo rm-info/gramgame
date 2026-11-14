@@ -140,7 +140,7 @@
 		<p class="muted">Aucun utilisateur trouvé.</p>
 	{:else}
 		<div class="card">
-			<table class="users-table">
+			<table class="users-table stack-table">
 				<thead>
 					<tr>
 						<th>Username</th>
@@ -155,12 +155,12 @@
 					{#each users as u (u.username)}
 						{@const isSelf = u.username === activeUsername.username}
 						<tr class:current={isSelf}>
-							<td>
+							<td data-label="Username">
 								<strong>{u.username}</strong>
 								{#if isSelf}<span class="muted self-tag">(toi)</span>{/if}
 							</td>
-							<td class="muted">{u.real_email}</td>
-							<td>
+							<td data-label="Email" class="muted">{u.real_email}</td>
+							<td data-label="Rôle">
 								{#if isSelf}
 									<span class="role-readonly">{u.role}</span>
 								{:else}
@@ -176,15 +176,15 @@
 									</select>
 								{/if}
 							</td>
-							<td class="muted">{formatDate(u.created_at)}</td>
-							<td class="muted">
+							<td data-label="Inscrit le" class="muted">{formatDate(u.created_at)}</td>
+							<td data-label="Statut" class="muted">
 								{#if u.verified}
 									<span class="ok">activé</span>
 								{:else}
 									<span class="pending">en attente</span>
 								{/if}
 							</td>
-							<td class="row-actions">
+							<td data-label="" class="row-actions">
 								{#if !isSelf}
 									<button
 										type="button"

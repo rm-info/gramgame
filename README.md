@@ -160,11 +160,39 @@ Garde-fous côté serveur (`pb_hooks/gramgame.pb.js`) : impossible de modifier s
 
 Depuis l'app : **Gestion → Règles** (admin). Ou depuis l'admin PocketBase `/_/` → collection `rules`.
 
-Une règle = un `id` (ex. `son-sont`), un nom affiché, une description, les candidats (`["son", "sont"]`), des **groupes de confusion** optionnels et des exemples qui guident le LLM. Elle apparaît immédiatement dans `/new`. Seul le type `multiple_choice` est géré pour l'instant.
+Une règle = un `id` (ex. `son-sont`), un nom affiché, une description, une catégorie (orthographe / grammaire / conjugaison, pour le regroupement dans `/new`), un **type d'exercice**, et selon le type : les candidats, des **groupes de confusion**, une configuration et des exemples qui guident le LLM. Elle apparaît immédiatement dans `/new`.
+
+### Types d'exercices
+
+| Type (`rule_type`) | Exercice | Bonne réponse |
+|---|---|---|
+| `multiple_choice` | texte à trous + menu (homophones) | donnée par le LLM, contrôlée (candidats, marqueurs, chaque confusion présente) |
+| `free_text` | texte à trous à remplir au clavier, infinitif affiché à côté | **calculée par le serveur** : le serveur tire les verbes et les personnes, le LLM n'écrit que l'histoire, la conjugaison vient de `pb_hooks/lib/conjugaison.js` |
+| `qcm` | une question par phrase (ou par verbe), boutons de réponse, explication après correction | liste fixe (groupes des verbes, sans LLM) ou LLM **vérifié par des règles** (passé/futur proche, pronom) |
+
+La configuration (`config`, JSON) d'une règle `free_text` / `qcm` choisit le générateur :
+- `{"generator": "verb_groups"}` : verbes tirés d'une liste fermée, groupe connu d'avance, avec les pièges (aller, -ir du 3e groupe, -oir, -re). « être » et « avoir » ne sont pas proposés (auxiliaires, hors groupe selon les manuels). À partir du CM2, une partie des verbes est présentée **conjuguée dans une phrase** (« Ils [[partent]] en vacances. ») : phrases construites sans IA à partir d'un complément écrit à la main pour chaque verbe (`GROUP_SENTENCES`).
+- `{"generator": "llm_qcm", "check": "proche" | "pronom", "highlight": true, "balance": true}` : phrases écrites par le LLM, passage clé entre `[[ ]]`. `check: proche` reclasse chaque phrase (venir de / aller + infinitif, sinon présent) et rejette l'exercice si le LLM s'est trompé ; `check: pronom` contrôle nombre, genre évident (la/le/une/un…), moi → nous, toi → vous. Avec `"hard_mode": "hide_highlight"` (et `hard_consigne`), le **mode difficile** ne surligne plus le passage : pour `pronom-gns`, l'élève doit d'abord retrouver le GNS ; les corrections le remontrent.
+- `{"generator": "conj_present", "pool": "present" | "eter_eler" | "accord"}` : texte à trous de conjugaison au présent. Le pronom sujet collé au trou est contrôlé (« nous {{3}} » doit être à la 1re du pluriel). Les orthographes rectifiées (1990) sont acceptées en variante (« il étiquète », « il connait ») et signalées « rectifiée » à la correction.
+
+**Niveau de l'élève** : pour `verb_groups` et `conj_present`, chaque verbe a une difficulté (1 courant / 2 pièges classiques / 3 rare ou difficile, dans `pb_hooks/lib/conjugaison.js`). Le niveau choisi donne un palier qui règle le mélange :
+
+| Niveau | Verbes tirés | Groupes : verbes conjugués en phrase | Accord sujet-verbe |
+|---|---|---|---|
+| CP – CE2 | faciles uniquement | 0 % | sujets simples juste avant le verbe, 3e personne seulement |
+| CM1 | ⅖ faciles, ⅗ moyens | 0 % | sujets éloignés, compléments du nom, sujets composés, pronom complément |
+| CM2 – 6e | ⅖ faciles, ⅗ moyens | 40 % | idem |
+| 5e et + | ⅕ faciles, ⅖ moyens, ⅖ difficiles | 60 % | + sujet inversé, proposition intercalée, « qui », « toi et moi » |
+
+Pour les exercices écrits par l'IA, le niveau règle aussi la longueur du texte et le vocabulaire.
+
+**Exercices au clavier** : à partir de 6 trous, chaque personne (je, tu, il/elle/on, nous, vous, ils/elles) a au moins un trou (garanti par le serveur, qui impose les personnes) ; pour la conjugaison, le LLM est aussi invité à utiliser au moins une fois chaque pronom sujet plutôt qu'un groupe nominal, sauf si ça nuit à la cohérence du récit (l'accord sujet-verbe, lui, travaille justement les groupes nominaux). Après correction, chaque erreur est expliquée sans IA par le conjugueur : forme correcte mais pour une autre personne → erreur d'accord avec le sujet ; sinon la règle qui s'applique (-oyer/-uyer → i, -ayer → les deux formes, -cer/-ger devant -ons, appeler/jeter, accent grave, é → è, terminaisons du 1er/2e groupe) ou le tableau complet d'un verbe irrégulier.
+
+Pour tous les types, la correction détaille le score par catégorie (confusion, groupe du verbe, accent grave / consonne doublée, sujet singulier / pluriel…), et l'appréciation de l'IA cible la catégorie la plus ratée.
 
 **Groupes de confusion** : une règle peut mélanger plusieurs confusions, ex. `on-son-et` = `on / ont`, `son / sont`, `et / es / est`. En mode normal, chaque trou ne propose que les mots de son groupe ; en **mode difficile** (case sur la page de l'exercice, verrouillée dès la première réponse), tous les candidats. La correction détaille le score par confusion, et l'appréciation cible la plus ratée. Les trous en début de phrase affichent les mots avec majuscule ; la comparaison ignore casse et type d'apostrophe (`'` / `’`).
 
-Règles livrées (programme CM2, période 1) : `a-a-ou-ou`, `on-son-et`, `se-ce-ses-ces` (`se / ce` et `ses / ces / s'est / c'est`), `ni-ny-si-sy` (révisions mélangées), et une règle par confusion : `a-a`, `ou-ou`, `on-ont`, `son-sont`, `et-es-est`, `se-ce`, `ses-ces`, `ni-ny`, `si-sy`.
+Règles livrées — programme CM2, période 1. **Orthographe** : `a-a-ou-ou`, `on-son-et`, `se-ce-ses-ces` (`se / ce` et `ses / ces / s'est / c'est`), `ni-ny-si-sy` (révisions mélangées), et une règle par confusion : `a-a`, `ou-ou`, `on-ont`, `son-sont`, `et-es-est`, `se-ce`, `ses-ces`, `ni-ny`, `si-sy`. **Conjugaison** : `groupe-verbe` (QCM), `passe-futur-proche` (QCM), `present-indicatif` et `present-eter-eler` (saisie). **Grammaire** : `accord-sujet-verbe` (saisie), `pronom-gns` (QCM).
 
 ## Coûts
 
@@ -191,7 +219,7 @@ gramgame/
 │   │   ├── profile.svelte.ts      # niveau scolaire
 │   │   ├── data.ts                # normalisation des records
 │   │   ├── api/                   # appels /api/gram/* + OTP
-│   │   └── components/            # BlankSelect, ExerciseText, ResultView, CodeStep
+│   │   └── components/            # BlankSelect, BlankInput, ExerciseText, QcmList, ResultView, CodeStep
 │   └── routes/                    # login, signup, onboarding, new, exercise, profile, admin
 └── pocketbase/
     ├── install.sh / run.sh
@@ -200,13 +228,16 @@ gramgame/
     ├── pb_migrations/             # schéma, API rules, seed, réglages
     └── pb_hooks/
         ├── gramgame.pb.js         # routes /api/gram/*, garde-fous, cron
-        └── lib/gram.js            # OTP, prompts LLM, validation, notation
+        └── lib/
+            ├── gram.js            # OTP, LLM, homophones (génération, validation, notation)
+            ├── exercises.js       # QCM et saisie : générateurs, contrôles, notation
+            └── conjugaison.js     # présent de l'indicatif + groupes des verbes (sans LLM)
 ```
 
 ## Décisions architecturales
 
 - **Génération LLM à la demande** + persistance de chaque exercice (id stable).
-- **Validation programmatique stricte** de la sortie LLM (nb de trous, candidats valides, marqueurs présents), retry max 2 sinon erreur claire. Pas de fallback silencieux : afficher du faux serait inacceptable pour un outil d'apprentissage.
+- **Validation programmatique stricte** de la sortie LLM (nb de trous, candidats valides, marqueurs présents, réponses recalculées ou contrôlées quand c'est possible), retry max 2 sinon erreur claire. Pas de fallback silencieux : afficher du faux serait inacceptable pour un outil d'apprentissage.
 - **API rules** : un utilisateur ne voit que ses exercices et tentatives ; profs/admins voient tous les exercices. Le catalogue `rules` est en lecture publique. Exercices et tentatives ne sont créés que par les routes serveur.
 - **Rate limiting** activé (inscription/connexion 5/min/IP, génération 10/min, correction 20/min).
 - **Détection de difficulté** : à la fin d'une correction sous 80 %, l'app propose un exercice ciblé sur la même règle.

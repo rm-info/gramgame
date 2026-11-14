@@ -1,13 +1,18 @@
 <script lang="ts">
 	import BlankSelect from './BlankSelect.svelte';
+	import BlankInput from './BlankInput.svelte';
 	import type { PerBlank } from '$lib/api/correct';
 	import { startsSentence } from '$lib/confusion';
 
 	interface Props {
 		text: string;
 		blankPositions: number[];
+		/** 'select' : menu déroulant (homophones) ; 'input' : saisie au clavier. */
+		mode?: 'select' | 'input';
 		/** Options du menu pour un trou donné (groupe de confusion ou tous les candidats). */
-		optionsFor: (position: number) => string[];
+		optionsFor?: (position: number) => string[];
+		/** Indice affiché à côté d'un champ de saisie (ex. l'infinitif). */
+		hintFor?: (position: number) => string;
 		responses: Record<number, string | null>;
 		readonly?: boolean;
 		results?: PerBlank[] | null;
@@ -16,7 +21,9 @@
 	let {
 		text,
 		blankPositions,
-		optionsFor,
+		mode = 'select',
+		optionsFor = () => [],
+		hintFor = () => '',
 		responses = $bindable(),
 		readonly = false,
 		results = null
@@ -57,6 +64,10 @@
 		return r.ok ? 'correct' : 'incorrect';
 	}
 
+	function blankVariant(pos: number): boolean {
+		return !!results?.find((b) => b.position === pos)?.variant;
+	}
+
 	function blankCorrect(pos: number): string {
 		const r = results?.find((b) => b.position === pos);
 		return r?.correct ?? '';
@@ -65,7 +76,15 @@
 
 <p class="exercise-text">
 	{#each segments as seg, i (i)}
-		{#if seg.kind === 'text'}{seg.value}{:else}<BlankSelect
+		{#if seg.kind === 'text'}{seg.value}{:else if mode === 'input'}<BlankInput
+				position={seg.position}
+				hint={hintFor(seg.position)}
+				bind:value={responses[seg.position]}
+				{readonly}
+				state={blankState(seg.position)}
+				correct={blankCorrect(seg.position)}
+				variant={blankVariant(seg.position)}
+			/>{:else}<BlankSelect
 				position={seg.position}
 				options={optionsFor(seg.position)}
 				capitalize={seg.capitalize}

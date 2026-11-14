@@ -14,8 +14,17 @@
 		id: string;
 		display_name: string;
 		short_description: string;
-		candidates: string[];
+		rule_type: 'multiple_choice' | 'free_text' | 'qcm';
+		category: string;
+		config: { generator?: string } | null;
 	}
+
+	const CATEGORIES: { id: string; label: string }[] = [
+		{ id: 'orthographe', label: 'Orthographe' },
+		{ id: 'grammaire', label: 'Grammaire' },
+		{ id: 'conjugaison', label: 'Conjugaison' },
+		{ id: '', label: 'Autres' }
+	];
 
 	interface PastExercise {
 		id: string;
@@ -25,7 +34,7 @@
 		num_blanks: number;
 		created_at: string;
 		verified: boolean;
-		rule: { display_name: string } | null;
+		rule: { display_name: string; rule_type?: string } | null;
 	}
 
 	let rules = $state<RuleOption[]>([]);
@@ -56,9 +65,8 @@
 	onMount(async () => {
 		try {
 			const data = await pb.collection('rules').getFullList({
-				filter: "rule_type = 'multiple_choice'",
-				sort: 'id',
-				fields: 'id,display_name,short_description,candidates'
+				sort: 'display_name',
+				fields: 'id,display_name,short_description,rule_type,category,config'
 			});
 			rules = data as unknown as RuleOption[];
 		} catch (e) {
@@ -102,7 +110,7 @@
 				sort: '-created',
 				expand: 'rule',
 				fields:
-					'id,rule,theme,grade_level,num_blanks,created,verified,expand.rule.id,expand.rule.display_name'
+					'id,rule,theme,grade_level,num_blanks,created,verified,expand.rule.id,expand.rule.display_name,expand.rule.rule_type'
 			})
 			.then((res) => {
 				pastExercises = res.items.map(mapExercise) as unknown as PastExercise[];
@@ -116,9 +124,22 @@
 			});
 	});
 
+	const selectedRule = $derived(rules.find((r) => r.id === ruleId) ?? null);
+	// La liste de verbes (groupes) est tirée au sort : pas de thème, pas d'IA.
+	const needsTheme = $derived(selectedRule?.config?.generator !== 'verb_groups');
+	const unitLabel = $derived(selectedRule?.rule_type === 'qcm' ? 'questions' : 'trous');
+	const rulesByCategory = $derived(
+		CATEGORIES.map((c) => ({
+			...c,
+			rules: rules.filter((r) =>
+				c.id ? r.category === c.id : !CATEGORIES.some((k) => k.id && k.id === r.category)
+			)
+		})).filter((c) => c.rules.length > 0)
+	);
+
 	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
-		if (!ruleId || !theme.trim() || !gradeLevel || !numBlanks) return;
+		if (!ruleId || (needsTheme && !theme.trim()) || !gradeLevel || !numBlanks) return;
 		submitting = true;
 		errorMsg = null;
 
@@ -130,7 +151,7 @@
 		try {
 			const ex = await generateExercise({
 				rule_id: ruleId,
-				theme: theme.trim(),
+				theme: needsTheme ? theme.trim() : '',
 				grade_level: gradeLevel,
 				num_blanks: numBlanks
 			});
@@ -161,7 +182,7 @@
 
 <section class="container stack">
 	<h1>Nouvel exercice</h1>
-	<p class="muted">Choisis une règle, un thème, ton niveau et le nombre de trous.</p>
+	<p class="muted">Choisis une notion, un thème, ton niveau et la longueur de l'exercice.</p>
 
 	<aside class="disclaimer">
 		<strong>⚠️ L'IA peut se tromper.</strong> Le texte généré, les bonnes réponses et le placement
@@ -178,14 +199,22 @@
 	{:else}
 		<form onsubmit={handleSubmit} class="card stack">
 			<div>
-				<label for="rule">Règle à pratiquer</label>
+				<label for="rule">Notion à pratiquer</label>
 				<select id="rule" bind:value={ruleId} required>
-					{#each rules as r (r.id)}
-						<option value={r.id}>{r.display_name} — {r.short_description}</option>
+					{#each rulesByCategory as cat (cat.id)}
+						<optgroup label={cat.label}>
+							{#each cat.rules as r (r.id)}
+								<option value={r.id}>{r.display_name}</option>
+							{/each}
+						</optgroup>
 					{/each}
 				</select>
+				{#if selectedRule}
+					<p class="muted rule-desc">{selectedRule.short_description}</p>
+				{/if}
 			</div>
 
+			{#if needsTheme}
 			<div>
 				<label for="theme">Thème de l'histoire</label>
 				<input
@@ -203,6 +232,7 @@
 					{/each}
 				</datalist>
 			</div>
+			{/if}
 
 			<div>
 				<label for="grade">Niveau</label>
@@ -211,22 +241,30 @@
 						<option value={level}>{level}</option>
 					{/each}
 				</select>
+				{#if selectedRule?.config?.generator === 'verb_groups' || selectedRule?.config?.generator === 'conj_present'}
+					<p class="muted rule-desc">
+						Le niveau règle aussi la difficulté des verbes proposés{selectedRule?.config
+							?.generator === 'verb_groups'
+							? ' (et, à partir du CM2, une partie est conjuguée dans une phrase)'
+							: ''}.
+					</p>
+				{/if}
 			</div>
 
 			<div>
 				<label for="num">
-					Nombre de trous : <strong>{numBlanks}</strong>
+					Nombre de {unitLabel} : <strong>{numBlanks}</strong>
 				</label>
 				<input id="num" type="range" min="3" max="30" bind:value={numBlanks} />
 			</div>
 
-			<button type="submit" disabled={submitting || !theme.trim()}>
-				{submitting ? 'Le prof prépare ton texte…' : 'Générer'}
+			<button type="submit" disabled={submitting || (needsTheme && !theme.trim())}>
+				{submitting ? 'Le prof prépare ton exercice…' : 'Générer'}
 			</button>
 
 			{#if submitting}
 				<p class="muted">
-					Cela peut prendre 5 à 15 secondes — l'IA écrit ton texte sur mesure et le vérifie.
+					Cela prend en général 30 secondes à 1 minute (parfois 2 ou 3 pour un long texte) : l'IA écrit ton texte sur mesure et le serveur le vérifie. Tu peux laisser la page ouverte et revenir plus tard : l'exercice sera aussi dans ta liste.
 				</p>
 			{/if}
 
@@ -265,13 +303,18 @@
 								{/if}
 							</div>
 							<div class="muted past-sub">
-								{ex.num_blanks} trous · {ex.grade_level} · {formatDate(ex.created_at)}
+								{ex.num_blanks}
+								{ex.rule?.rule_type === 'qcm' ? 'questions' : 'trous'} · {ex.grade_level} ·
+								{formatDate(ex.created_at)}
 							</div>
 						</div>
 						<div class="past-controls">
 							{#if ex.num_blanks > minBlanks}
 								<label class="trous-picker">
-									<span>Faire <strong>{selected}</strong>/{ex.num_blanks} trous</span>
+									<span
+										>Faire <strong>{selected}</strong>/{ex.num_blanks}
+										{ex.rule?.rule_type === 'qcm' ? 'questions' : 'trous'}</span
+									>
 									<input
 										type="range"
 										min={minBlanks}
@@ -290,6 +333,10 @@
 </section>
 
 <style>
+	.rule-desc {
+		font-size: 0.9em;
+		margin: 6px 0 0;
+	}
 	.disclaimer {
 		background: rgba(201, 122, 29, 0.08);
 		border-left: 3px solid var(--color-warning);

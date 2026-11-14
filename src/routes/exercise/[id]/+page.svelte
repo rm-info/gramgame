@@ -2,21 +2,21 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { base } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { pb, errorMessage } from '$lib/pb';
-	import { mapExercise, type ExerciseRow } from '$lib/data';
+	import { mapExercise, type ExerciseRow, type BlankRow, type RuleInfo } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import ExerciseText from '$lib/components/ExerciseText.svelte';
+	import QcmList from '$lib/components/QcmList.svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { correctAttempt, type CorrectionResult } from '$lib/api/correct';
 	import { truncateExercise } from '$lib/truncate-exercise';
 	import { hasSeveralGroups, optionsForBlank, ruleGroups, groupLabel } from '$lib/confusion';
 
 	const HARD_MODE_KEY = 'gramgame.hard_mode';
-
-	interface BlankRow {
-		position: number;
-		correct: string;
-	}
+	// Réponses en cours, par compte et par exercice : un rechargement (ou un
+	// onglet fermé par le système) ne fait plus perdre ce qui a été tapé.
+	const draftKey = (id: string) => `gramgame.draft.${pb.authStore.record?.id ?? 'anon'}.${id}`;
 
 	interface ExerciseData {
 		id: string;
@@ -31,15 +31,9 @@
 		verified_by_username: string | null;
 	}
 
-	interface RuleData {
-		id: string;
-		display_name: string;
-		candidates: string[];
-		groups: string[][] | null;
-	}
-
 	let exercise = $state<ExerciseData | null>(null);
-	let rule = $state<RuleData | null>(null);
+	let rule = $state<RuleInfo | null>(null);
+	const ruleType = $derived(rule?.rule_type ?? 'multiple_choice');
 	let loadError = $state<string | null>(null);
 	let loading = $state(true);
 
@@ -51,7 +45,15 @@
 	// Mode difficile : chaque trou propose tous les mots de la règle au lieu
 	// du seul groupe de confusion concerné. Mémorisé d'un exercice à l'autre.
 	let hardMode = $state(readHardMode());
-	const severalGroups = $derived(rule ? hasSeveralGroups(rule) : false);
+	const severalGroups = $derived(
+		rule && rule.rule_type === 'multiple_choice' ? hasSeveralGroups(rule) : false
+	);
+	// QCM dont le mode difficile masque le passage surligné (ex. le GNS).
+	const hideHighlightMode = $derived(
+		rule?.rule_type === 'qcm' && rule.config?.hard_mode === 'hide_highlight'
+	);
+	const hardAvailable = $derived(severalGroups || hideHighlightMode);
+	const hardActive = $derived(hardMode && hardAvailable);
 	// Verrouillé dès la première réponse (sinon on pourrait « tricher » en
 	// passant en mode normal pour voir le groupe, puis revenir).
 	const hardModeLocked = $derived(Object.values(responses).some((v) => v !== null));
@@ -79,6 +81,19 @@
 		return optionsForBlank(rule, blank?.correct ?? '', hardMode && severalGroups);
 	}
 
+	// Saisie au clavier : l'infinitif du verbe (et la personne si le sujet est
+	// un groupe nominal, pour l'accord) est affiché à côté du champ.
+	function hintFor(position: number): string {
+		const blank = exercise?.blanks.find((b) => b.position === position);
+		return blank?.verb ?? '';
+	}
+
+	const unit = $derived(ruleType === 'qcm' ? 'questions' : 'trous');
+
+	function filled(v: string | null | undefined) {
+		return v !== null && v !== undefined && v.trim() !== '';
+	}
+
 	const exerciseId = $derived(page.params.id);
 	const maxParam = $derived(Number(page.url.searchParams.get('max')) || 0);
 
@@ -87,12 +102,17 @@
 		if (!exercise) return null;
 		const requested = maxParam > 0 ? maxParam : exercise.num_blanks;
 		const effective = Math.max(1, Math.min(requested, exercise.num_blanks));
+		// QCM : on garde simplement les N premières questions.
+		if (ruleType === 'qcm') {
+			const sorted = [...exercise.blanks].sort((a, b) => a.position - b.position);
+			return { text: exercise.text, blanks: sorted.slice(0, effective) };
+		}
 		return truncateExercise(exercise.text, exercise.blanks, effective);
 	});
 
 	const blankPositions = $derived(view?.blanks.map((b) => b.position) ?? []);
 	const allFilled = $derived(
-		view && blankPositions.every((p) => responses[p] !== null && responses[p] !== undefined)
+		view && blankPositions.every((p) => filled(responses[p]))
 	);
 
 	onMount(async () => {
@@ -111,6 +131,7 @@
 		for (const b of exercise.blanks) {
 			responses[b.position] = null;
 		}
+		restoreDraft(exercise.id, exercise.blanks);
 
 		if (!ex.rule) {
 			loadError = 'Règle introuvable.';
@@ -121,6 +142,53 @@
 		loading = false;
 	});
 
+	function restoreDraft(id: string, blanks: BlankRow[]) {
+		try {
+			const saved = JSON.parse(localStorage.getItem(draftKey(id)) ?? 'null');
+			if (!saved || typeof saved !== 'object') return;
+			for (const b of blanks) {
+				const v = saved[b.position];
+				if (typeof v === 'string') responses[b.position] = v;
+			}
+		} catch {
+			// brouillon illisible ou stockage indisponible : on repart de zéro
+		}
+	}
+
+	// Sauvegarde du brouillon à chaque réponse (tant que l'exercice n'est pas corrigé).
+	$effect(() => {
+		if (!exercise || result) return;
+		const answered = Object.fromEntries(Object.entries(responses).filter(([, v]) => v !== null));
+		try {
+			if (Object.keys(answered).length) localStorage.setItem(draftKey(exercise.id), JSON.stringify(answered));
+			else localStorage.removeItem(draftKey(exercise.id));
+		} catch {
+			// stockage indisponible : pas de brouillon
+		}
+	});
+
+	let deleting = $state(false);
+	async function handleDelete() {
+		if (!exercise) return;
+		const ok = confirm(
+			"Supprimer définitivement cet exercice ?\n\nLes résultats des élèves qui l'ont déjà fait seront supprimés aussi."
+		);
+		if (!ok) return;
+		deleting = true;
+		try {
+			await pb.collection('exercises').delete(exercise.id);
+			try {
+				localStorage.removeItem(draftKey(exercise.id));
+			} catch {
+				// rien à nettoyer
+			}
+			await goto(`${base}/`);
+		} catch (e) {
+			alert(`Suppression impossible : ${errorMessage(e)}`);
+			deleting = false;
+		}
+	}
+
 	async function handleSubmit() {
 		if (!exercise || !view || !allFilled) return;
 		submitting = true;
@@ -130,8 +198,8 @@
 		const keptPositions = new Set(view.blanks.map((b) => b.position));
 		const payload: Record<string, string> = {};
 		for (const [pos, val] of Object.entries(responses)) {
-			if (val !== null && keptPositions.has(Number(pos))) {
-				payload[pos] = val;
+			if (filled(val) && keptPositions.has(Number(pos))) {
+				payload[pos] = (val as string).trim();
 			}
 		}
 
@@ -139,8 +207,13 @@
 			result = await correctAttempt({
 				exercise_id: exercise.id,
 				responses: payload,
-				hard_mode: hardMode && severalGroups
+				hard_mode: hardActive
 			});
+			try {
+				localStorage.removeItem(draftKey(exercise.id));
+			} catch {
+				// rien à nettoyer
+			}
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 		} catch (e) {
 			submitError = (e as Error).message;
@@ -164,22 +237,56 @@
 				{result}
 				ruleId={exercise.rule_id}
 				ruleName={rule.display_name}
+				breakdownTitle={ruleType === 'multiple_choice' ? undefined : 'Détail'}
 				theme={exercise.theme}
 				gradeLevel={exercise.grade_level}
 				numBlanks={view.blanks.length}
 			/>
 
+			{#if ruleType === 'free_text'}
+				{@const errors = result.per_blank.filter((b) => !b.ok)}
+				{#if errors.length > 0}
+					<div class="card stack">
+						<h3>Tes erreurs expliquées</h3>
+						<ul class="explanations">
+							{#each errors as e (e.position)}
+								<li>
+									<span class="wrong">{e.given || '—'}</span> →
+									<strong class="right">{e.correct}</strong>
+									<span class="muted">({hintFor(e.position)})</span>
+									{#if e.explanation}<p>{e.explanation}</p>{/if}
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+			{/if}
+
 			<details class="card">
-				<summary>Voir le texte avec les corrections</summary>
+				<summary>
+					{ruleType === 'qcm' ? 'Voir les corrections' : 'Voir le texte avec les corrections'}
+				</summary>
 				<div style="margin-top: var(--space-4);">
-					<ExerciseText
-						text={view.text}
-						blankPositions={view.blanks.map((b) => b.position)}
-						{optionsFor}
-						bind:responses
-						readonly
-						results={result.per_blank}
-					/>
+					{#if ruleType === 'qcm'}
+						<QcmList
+							items={view.blanks}
+							options={rule.candidates}
+							bind:responses
+							readonly
+							results={result.per_blank}
+						/>
+					{:else}
+						<ExerciseText
+							text={view.text}
+							blankPositions={view.blanks.map((b) => b.position)}
+							mode={ruleType === 'free_text' ? 'input' : 'select'}
+							{optionsFor}
+							{hintFor}
+							bind:responses
+							readonly
+							results={result.per_blank}
+						/>
+					{/if}
 				</div>
 			</details>
 		{:else}
@@ -199,19 +306,24 @@
 						{/if}
 					</div>
 					{#if activeUsername.canEditExercises}
-						<a href={`${base}/exercise/${exercise.id}/edit`} class="edit-link">Modifier</a>
+						<div class="editor-actions">
+							<a href={`${base}/exercise/${exercise.id}/edit`} class="edit-link">Modifier</a>
+							<button type="button" class="delete-btn" onclick={handleDelete} disabled={deleting}>
+								{deleting ? 'Suppression…' : 'Supprimer'}
+							</button>
+						</div>
 					{/if}
 				</div>
 				<p class="muted">
 					Thème : <em>{exercise.theme}</em> · Niveau : {exercise.grade_level} ·
-					{view.blanks.length} trous
+					{view.blanks.length} {unit}
 					{#if view.blanks.length < exercise.num_blanks}
 						<span class="muted">(version courte sur {exercise.num_blanks} possibles)</span>
 					{/if}
 				</p>
 			</header>
 
-			{#if severalGroups}
+			{#if hardAvailable}
 				<div class="mode-row">
 					<label class="mode-toggle" class:locked={hardModeLocked}>
 						<input
@@ -221,12 +333,20 @@
 							onchange={(e) => setHardMode((e.currentTarget as HTMLInputElement).checked)}
 						/>
 						<span>
-							<strong>Mode difficile</strong> : chaque trou propose tous les mots
-							({rule.candidates.join(', ')}).
+							<strong>Mode difficile</strong> :
+							{#if hideHighlightMode}
+								rien n'est surligné, à toi de trouver le passage concerné.
+							{:else}
+								chaque trou propose tous les mots ({rule.candidates.join(', ')}).
+							{/if}
 						</span>
 					</label>
 					<p class="muted small">
-						{#if hardMode}
+						{#if hideHighlightMode}
+							{hardMode
+								? 'Les corrections montreront le passage à trouver.'
+								: 'Le passage à observer est surligné dans chaque phrase.'}
+						{:else if hardMode}
 							Comme dans une dictée : à toi de trouver de quelle confusion il s'agit.
 						{:else}
 							Chaque trou ne propose que les mots qui se confondent :
@@ -239,20 +359,40 @@
 				</div>
 			{/if}
 
-			<div class="card">
-				<ExerciseText
-					text={view.text}
-					{blankPositions}
-					{optionsFor}
-					bind:responses
-				/>
-			</div>
+			{#if ruleType === 'qcm'}
+				<p class="consigne">
+					{hardActive && rule.config?.hard_consigne ? rule.config.hard_consigne : view.text}
+				</p>
+				<div class="card">
+					<QcmList
+						items={view.blanks}
+						options={rule.candidates}
+						bind:responses
+						hideHighlight={hardActive && hideHighlightMode}
+					/>
+				</div>
+			{:else}
+				{#if ruleType === 'free_text'}
+					<p class="consigne">
+						Écris chaque verbe entre parenthèses au <strong>présent</strong>, accordé avec son sujet.
+					</p>
+				{/if}
+				<div class="card">
+					<ExerciseText
+						text={view.text}
+						{blankPositions}
+						mode={ruleType === 'free_text' ? 'input' : 'select'}
+						{optionsFor}
+						{hintFor}
+						bind:responses
+					/>
+				</div>
+			{/if}
 
 			{#if view.blanks.length < exercise.num_blanks}
 				<aside class="truncation-note">
-					💡 Tu fais une version courte de cet exercice. Pour lire l'histoire en entier, lance-le
-					avec ses <strong>{exercise.num_blanks} trous</strong> complets depuis la page « Nouvel
-					exercice ».
+					💡 Tu fais une version courte de cet exercice. Pour le faire en entier, lance-le avec ses
+					<strong>{exercise.num_blanks} {unit}</strong> depuis la page « Nouvel exercice ».
 				</aside>
 			{/if}
 
@@ -261,7 +401,9 @@
 					{submitting ? 'Correction en cours…' : "J'ai terminé"}
 				</button>
 				{#if !allFilled}
-					<span class="muted">Remplis tous les trous pour valider.</span>
+					<span class="muted">
+						{ruleType === 'qcm' ? 'Réponds à toutes les questions pour valider.' : 'Remplis tous les trous pour valider.'}
+					</span>
 				{/if}
 				{#if submitError}
 					<p class="error">{submitError}</p>
@@ -272,10 +414,34 @@
 </section>
 
 <style>
+	.explanations {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3, 12px);
+	}
+	.explanations p {
+		margin: 4px 0 0;
+		font-size: 0.95em;
+	}
+	.explanations .wrong {
+		color: var(--color-error);
+		text-decoration: line-through;
+	}
+	.explanations .right {
+		color: var(--color-success);
+	}
+	.consigne {
+		margin: 0;
+		font-weight: 500;
+	}
 	.mode-row {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-1, 4px);
+		margin-bottom: var(--space-2, 8px);
 	}
 	.mode-toggle {
 		display: flex;
@@ -326,6 +492,25 @@
 		border-radius: 999px;
 		font-size: 0.85em;
 		font-weight: 600;
+	}
+	.editor-actions {
+		display: flex;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.delete-btn {
+		font-size: 0.9em;
+		padding: 4px 10px;
+		border: 1px solid var(--color-error, #b3261e);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--color-error, #b3261e);
+		cursor: pointer;
+	}
+	.delete-btn:hover:not(:disabled) {
+		background: var(--color-error, #b3261e);
+		color: white;
 	}
 	.edit-link {
 		font-size: 0.9em;

@@ -58,6 +58,29 @@
 		})
 	);
 
+	let deletingId = $state<string | null>(null);
+	let deleteError = $state<string | null>(null);
+
+	async function deleteExercise(ex: ExerciseRow) {
+		const label = `${ex.rule?.display_name ?? ex.rule_id} — ${ex.theme}`;
+		if (
+			!confirm(
+				`Supprimer définitivement « ${label} » ?\n\nLes résultats des élèves qui l'ont déjà fait seront supprimés aussi.`
+			)
+		)
+			return;
+		deletingId = ex.id;
+		deleteError = null;
+		try {
+			await pb.collection('exercises').delete(ex.id);
+			exercises = exercises.filter((x) => x.id !== ex.id);
+		} catch (e) {
+			deleteError = errorMessage(e);
+		} finally {
+			deletingId = null;
+		}
+	}
+
 	function formatDate(iso: string) {
 		return new Date(iso).toLocaleString('fr-FR', {
 			day: 'numeric',
@@ -74,7 +97,7 @@
 		<h1>Exercices</h1>
 		<p class="muted">
 			Tous les exercices générés. Tu peux les éditer pour corriger un texte, ajuster les bonnes
-			réponses, ou supprimer un trou mal placé.
+			réponses, supprimer un trou mal placé, ou supprimer un exercice raté.
 		</p>
 	</header>
 
@@ -90,6 +113,9 @@
 			</label>
 		</div>
 
+		{#if deleteError}
+			<p class="error">Suppression impossible : {deleteError}</p>
+		{/if}
 		{#if loading}
 			<p class="muted">Chargement…</p>
 		{:else if loadError}
@@ -101,7 +127,7 @@
 					: 'Aucun exercice ne correspond aux filtres.'}
 			</p>
 		{:else}
-			<table class="ex-table">
+			<table class="ex-table stack-table">
 				<thead>
 					<tr>
 						<th>Vérifié</th>
@@ -118,7 +144,7 @@
 				<tbody>
 					{#each filtered as ex (ex.id)}
 						<tr>
-							<td>
+							<td data-label="Vérifié">
 								{#if ex.verified}
 									<span
 										class="verified-pill"
@@ -132,15 +158,23 @@
 									<span class="muted small">—</span>
 								{/if}
 							</td>
-							<td><strong>{ex.rule?.display_name ?? ex.rule_id}</strong></td>
-							<td>{ex.theme}</td>
-							<td class="muted">{ex.grade_level}</td>
-							<td class="muted">{ex.num_blanks}</td>
-							<td class="muted">{ex.created_by_username}</td>
-							<td class="muted small">{ex.llm_model}</td>
-							<td class="muted small">{formatDate(ex.created_at)}</td>
-							<td>
+							<td data-label="Règle"><strong>{ex.rule?.display_name ?? ex.rule_id}</strong></td>
+							<td data-label="Thème">{ex.theme}</td>
+							<td data-label="Niveau" class="muted">{ex.grade_level}</td>
+							<td data-label="Trous" class="muted">{ex.num_blanks}</td>
+							<td data-label="Auteur" class="muted">{ex.created_by_username}</td>
+							<td data-label="Modèle" class="muted small">{ex.llm_model}</td>
+							<td data-label="Date" class="muted small">{formatDate(ex.created_at)}</td>
+							<td data-label="" class="actions">
 								<a href={`${base}/exercise/${ex.id}/edit`} class="edit-btn">Éditer</a>
+								<button
+									type="button"
+									class="delete-btn"
+									onclick={() => deleteExercise(ex)}
+									disabled={deletingId === ex.id}
+								>
+									{deletingId === ex.id ? '…' : 'Supprimer'}
+								</button>
 							</td>
 						</tr>
 					{/each}
@@ -210,6 +244,23 @@
 		background: var(--color-primary);
 		color: white;
 		text-decoration: none;
+	}
+	.actions {
+		white-space: nowrap;
+	}
+	.delete-btn {
+		margin-left: var(--space-2);
+		padding: 4px 10px;
+		border: 1px solid var(--color-error, #b3261e);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--color-error, #b3261e);
+		font-size: 0.9em;
+		cursor: pointer;
+	}
+	.delete-btn:hover:not(:disabled) {
+		background: var(--color-error, #b3261e);
+		color: white;
 	}
 	.verified-pill {
 		display: inline-block;

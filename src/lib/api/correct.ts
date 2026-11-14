@@ -11,6 +11,10 @@ export interface PerBlank {
 	given: string | null;
 	correct: string;
 	ok: boolean;
+	/** Réponse acceptée en orthographe rectifiée (réforme 1990). */
+	variant?: boolean;
+	/** QCM : explication de la bonne réponse. */
+	explanation?: string;
 }
 
 export interface CorrectionResult {
