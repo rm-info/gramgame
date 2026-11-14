@@ -15,6 +15,16 @@ const C = [['Ce matin, nous ', '', '1p'], ["Puis j'", '', '1s'], ['Les enfants '
   ['Nous nous ', '', '1p'], ['Il nous ', '', '3s'], ['Le chien nous ', '', null], ['Pourquoi ', '-tu', '2s'], ['Où ', '-t-il', '3s'],
   ['Elle ne ', '', '3s'], ['Paul et moi, nous ', '', '1p'], ['Vous ', '', '2p'], ['qu\'elles ', '', '3p']];
 for (const [b, a, e] of C) ok(ex.personFromContext(b, a) === e, `contexte "${b}…${a}" → ${ex.personFromContext(b, a)} (attendu ${e})`);
+// Virgule avant « nous » / « vous » : ambigu, on suit le sujet déclaré.
+ok(ex.personFromContext('Le forgeron, ravi, nous ', ' donne du pain.', 'Le forgeron') === null, 'incise + nous complément');
+ok(ex.personFromContext('Soudain, nous ', ' partons.', 'nous') === '1p', 'virgule + nous sujet');
+ok(ex.personFromContext('Le soir, ils ', ' partent.', 'ils') === '3p', 'virgule + ils');
+// Élision oubliée : « le {{1}} » devant appellent → refus ; « l'{{1}} » → OK.
+{
+  const a1 = [{ verb: 'appeler', person: '3p', category: 'x' }];
+  ok(ex.validateConj({ text: 'Les habitants le {{1}} Gros Marteau.', blanks: [{ position: 1, verb: 'appeler', person: '3p', subject: 'Les habitants' }] }, a1).error, 'élision oubliée refusée');
+  ok(!ex.validateConj({ text: "Les habitants l'{{1}} Gros Marteau.", blanks: [{ position: 1, verb: 'appeler', person: '3p', subject: 'Les habitants' }] }, a1).error, 'élision OK');
+}
 // validateConj rejects wrong person in text
 const assign = [{ verb: 'jeter', person: '3p', category: 'x' }, { verb: 'acheter', person: '1s', category: 'y' }];
 ok(!ex.validateConj({ text: "Ils {{1}} les papiers. J'{{2}} du pain.", blanks: [{ position: 1, verb: 'jeter', person: '3p', subject: 'ils' }, { position: 2, verb: 'acheter', person: '1s', subject: 'je' }] }, assign).error, 'validateConj OK');

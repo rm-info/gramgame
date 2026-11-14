@@ -417,13 +417,14 @@ const OBJECT_CLITICS = new Set(['ne', 'n', 'me', 'm', 'te', 't', 'se', 's', 'le'
  * Personne déduite du pronom sujet collé au trou (« nous {{3}} », « j'{{2}} »,
  * « {{4}}-tu »), ou null si le sujet est un groupe nominal / indéterminé.
  */
-function personFromContext(before, after) {
+function personFromContext(before, after, declaredSubject) {
 	const inv = String(after).match(/^-(?:t-)?(je|tu|il|elle|on|nous|vous|ils|elles)\b/i);
 	if (inv) return SUBJECT_PRONOUNS[inv[1].toLowerCase()];
 	const toks = String(before)
 		.toLowerCase()
 		.replace(/[’]/g, "'")
-		.replace(/([.,;:!?«»"—()\n])/g, ' . ')
+		.replace(/([.;:!?«»"—()\n])/g, ' . ')
+		.replace(/,/g, ' , ')
 		.split(/[\s']+/)
 		.filter(Boolean);
 	let i = toks.length - 1;
@@ -437,6 +438,14 @@ function personFromContext(before, after) {
 		if (prev === t) return SUBJECT_PRONOUNS[t]; // « nous nous levons »
 		if (prev && SUBJECT_PRONOUNS[prev] && prev !== 'nous' && prev !== 'vous') return SUBJECT_PRONOUNS[prev]; // « il nous voit »
 		if (prev === undefined || prev === '.') return SUBJECT_PRONOUNS[t]; // début de phrase
+		if (prev === ',') {
+			// Ambigu : « Soudain, nous partons » (sujet, cas le plus courant) ou
+			// « Le forgeron, ravi, nous donne… » (complément). Si le sujet déclaré
+			// pour ce trou est clairement autre chose, on ne conclut pas.
+			const d = String(declaredSubject || '').trim().toLowerCase();
+			const self = t === 'nous' ? /\b(nous|moi)\b/ : /\b(vous|toi)\b/;
+			return d && !self.test(d) ? null : SUBJECT_PRONOUNS[t];
+		}
 		return null; // « Les enfants nous regardent » : indéterminé
 	}
 	return SUBJECT_PRONOUNS[t] || null;
@@ -536,8 +545,11 @@ const PERSON_HINT = {
 function callConj(cfg, rule, req, assignments, attemptIdx) {
 	const c = config(rule);
 	const n = assignments.length;
-	const textLength = Math.min(60 + n * 14, 380);
-	const list = assignments.map((a, i) => `{{${i + 1}}} : « ${a.verb} », ${PERSON_HINT[a.person]}`).join('\n');
+	// Assez de place pour une vraie histoire : environ un trou pour 20 mots.
+	const textLength = Math.min(80 + n * 18, 520);
+	// Lot imposé, mais l'ordre est libre : le LLM place chaque verbe là où il
+	// sert le récit (un ordre imposé donnait une suite de phrases sans lien).
+	const list = assignments.map((a) => `- « ${a.verb} », ${PERSON_HINT[a.person]}`).join('\n');
 	const focus = c.focus === 'accord' ? ACCORD_FOCUS[conj.levelTier(req.grade_level)] || ACCORD_FOCUS[2] : '';
 	// Conjugaison (pas l'accord, qui travaille justement les groupes nominaux) :
 	// on veut voir tous les pronoms personnels, sans sacrifier la cohérence.
@@ -547,22 +559,30 @@ function callConj(cfg, rule, req, assignments, attemptIdx) {
 			: "\n- PRONOMS : pour chaque personne présente dans la liste, essaie d'utiliser AU MOINS UNE FOIS le pronom sujet lui-même (je / j', tu, il ou elle ou on, nous, vous, ils ou elles) plutôt qu'un groupe nominal ; un dialogue entre les personnages aide pour « tu » et « vous ». Si ça rend l'histoire bancale, tu peux mettre un groupe nominal à la place (« les chiens » pour ils) : la cohérence du récit passe avant.";
 	const retryHint =
 		attemptIdx > 0
-			? "\n\n⚠️ Ta tentative précédente était invalide : vérifie que chaque marqueur est présent une seule fois, que chaque trou utilise le verbe et la personne imposés, que le sujet est bien à la bonne personne, et qu'il n'y a pas d'infinitif entre parenthèses."
+			? "\n\n⚠️ Ta tentative précédente était invalide : vérifie que chaque marqueur est présent une seule fois, que chaque couple verbe + personne imposé est utilisé exactement une fois, que le sujet est bien à la bonne personne, et qu'il n'y a pas d'infinitif entre parenthèses."
 			: '';
 
 	const userPrompt = `NOTION : ${rule.display_name}
 EXPLICATION : ${rule.short_description}
 
 Écris un texte narratif d'environ ${textLength} mots, AU PRÉSENT, sur le thème « ${req.theme} », pour un élève de niveau ${req.grade_level}.
-Il contient exactement ${n} trous, numérotés dans l'ordre d'apparition. Chaque trou remplace un verbe conjugué au présent de l'indicatif. Verbe et personne IMPOSÉS :
+Il contient exactement ${n} trous. Chaque trou remplace un verbe conjugué au présent de l'indicatif. Voici les ${n} couples verbe + personne IMPOSÉS, chacun à utiliser exactement une fois, DANS L'ORDRE QUE TU VEUX :
 ${list}
 ${focus}
+
+MÉTHODE (le plus important) :
+1. Imagine d'abord une VRAIE HISTOIRE : quelques personnages qui reviennent, un fil (début, péripétie, fin), un seul narrateur, des lieux cohérents entre eux. Chaque phrase doit découler de la précédente.
+2. Place ensuite chaque verbe imposé à l'endroit où il sert ce récit. Tu peux réordonner librement la liste.
+3. Au plus UN trou par phrase, et garde des phrases sans trou pour que le récit respire : ce n'est pas une liste de phrases d'exemple.
+4. Tout pronom complément (le, la, l', les, lui, leur, en, y) doit renvoyer à quelqu'un ou quelque chose de clairement nommé juste avant.
+5. Relis-toi : si une phrase n'a de sens que pour placer un piège, ou contredit le reste de l'histoire, réécris-la.
 
 RÈGLES DE FORME (très important) :
 - Le marqueur \`{{N}}\` remplace UNIQUEMENT la forme conjuguée du verbe (un seul mot) : le sujet, « ne », le pronom réfléchi (« nous nous {{2}} ») et les pronoms compléments restent écrits dans le texte.
 - N'écris jamais l'infinitif ni d'indice à côté du marqueur (pas de « {{1}} (jeter) ») : l'affichage l'ajoute.
 - Si le sujet est « je » et que le verbe commence par une voyelle ou un h muet, écris « j'{{N}} » (apostrophe collée au marqueur).
 - Le sujet de chaque trou doit être clairement à la personne demandée.${pronounRule}
+- Numérote les marqueurs {{1}}, {{2}}, … dans l'ordre d'apparition dans le texte.
 - Pour chaque trou, indique le verbe (à l'infinitif, sans « se »), la personne (1s, 2s, 3s, 1p, 2p, 3p) et le sujet tel qu'il est écrit dans le texte.${retryHint}
 
 Réponds UNIQUEMENT en appelant le tool submit_text.`;
@@ -627,22 +647,29 @@ function validateConj(out, assignments) {
 	const text = out.text;
 	if (/\{\{\d+\}\}\s*\(/.test(text)) return fail("Indice entre parenthèses collé à un marqueur.");
 	const blanks = [];
+	const remaining = assignments.slice();
 	for (let pos = 1; pos <= n; pos++) {
 		const marker = `{{${pos}}}`;
 		const idx = text.indexOf(marker);
 		if (idx < 0 || text.indexOf(marker, idx + 1) >= 0) return fail(`Le marqueur ${marker} doit apparaître une seule fois.`);
-		const a = assignments[pos - 1];
 		const b = out.blanks.find((x) => x && x.position === pos);
 		if (!b) return fail(`Trou ${pos} non décrit.`);
 		const verb = g.normalizeWord(b.verb).replace(/^(se |s')/, '');
-		if (verb !== a.verb) return fail(`Trou ${pos} : verbe « ${b.verb} » au lieu de « ${a.verb} ».`);
-		if (b.person !== a.person) return fail(`Trou ${pos} : personne ${b.person} au lieu de ${a.person}.`);
-		const ctx = personFromContext(text.slice(0, idx), text.slice(idx + marker.length));
+		// Ordre libre : chaque trou consomme un couple verbe + personne du lot imposé.
+		const k = remaining.findIndex((x) => x.verb === verb && x.person === b.person);
+		if (k < 0) return fail(`Trou ${pos} : « ${b.verb} » (${b.person}) ne fait pas partie des verbes imposés restants.`);
+		const a = remaining.splice(k, 1)[0];
+		const ctx = personFromContext(text.slice(0, idx), text.slice(idx + marker.length), b.subject);
 		if (ctx && ctx !== a.person) {
 			return fail(`Trou ${pos} : le pronom sujet du texte correspond à ${ctx}, pas à ${a.person}.`);
 		}
 		const accepted = conj.conjugatePerson(a.verb, a.person);
 		if (!accepted) return fail(`Verbe inconnu du conjugueur : ${a.verb}.`);
+		// Élision oubliée devant une forme qui commence par une voyelle (« le appellent »).
+		const unelided = text.slice(0, idx).match(/(?:^|[\s«"(])(je|me|te|se|le|la|ne)\s+$/i);
+		if (unelided && /^[aeiouyàâéèêëîïôû]/i.test(accepted[0])) {
+			return fail(`Trou ${pos} : « ${unelided[1]} ${accepted[0]} » doit s'écrire « ${unelided[1].slice(0, -1)}'${accepted[0]} » (élision, marqueur collé à l'apostrophe).`);
+		}
 		blanks.push({
 			position: pos,
 			verb: a.verb,
