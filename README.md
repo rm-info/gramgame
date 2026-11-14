@@ -186,6 +186,8 @@ La configuration (`config`, JSON) d'une règle `free_text` / `qcm` choisit le g�
 
 Pour les exercices écrits par l'IA, le niveau règle aussi la longueur du texte et le vocabulaire.
 
+**Exercices au clavier** : à partir de 6 trous, chaque personne (je, tu, il/elle/on, nous, vous, ils/elles) a au moins un trou (garanti par le serveur, qui impose les personnes) ; pour la conjugaison, le LLM est aussi invité à utiliser au moins une fois chaque pronom sujet plutôt qu'un groupe nominal, sauf si ça nuit à la cohérence du récit (l'accord sujet-verbe, lui, travaille justement les groupes nominaux). Après correction, chaque erreur est expliquée sans IA par le conjugueur : forme correcte mais pour une autre personne → erreur d'accord avec le sujet ; sinon la règle qui s'applique (-oyer/-uyer → i, -ayer → les deux formes, -cer/-ger devant -ons, appeler/jeter, accent grave, é → è, terminaisons du 1er/2e groupe) ou le tableau complet d'un verbe irrégulier.
+
 Pour tous les types, la correction détaille le score par catégorie (confusion, groupe du verbe, accent grave / consonne doublée, sujet singulier / pluriel…), et l'appréciation de l'IA cible la catégorie la plus ratée.
 
 **Groupes de confusion** : une règle peut mélanger plusieurs confusions, ex. `on-son-et` = `on / ont`, `son / sont`, `et / es / est`. En mode normal, chaque trou ne propose que les mots de son groupe ; en **mode difficile** (case sur la page de l'exercice, verrouillée dès la première réponse), tous les candidats. La correction détaille le score par confusion, et l'appréciation cible la plus ratée. Les trous en début de phrase affichent les mots avec majuscule ; la comparaison ignore casse et type d'apostrophe (`'` / `’`).

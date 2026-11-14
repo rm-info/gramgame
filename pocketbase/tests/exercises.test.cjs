@@ -32,7 +32,7 @@ ok(validateQ(ruleN, [['Les chats dorment.', 'ils']]), 'QCM sans [[ ]] doit être
 function validateQ(rule, items) { return ex.validateQcm({ items: items.map(([prompt, correct]) => ({ prompt, correct, explanation: '' })) }, rule, items.length).error; }
 // verb groups: explanation for -oir
 const vg = ex.generateVerbGroups(30); ok(vg.blanks.length === 30, '30 verbes');
-for (const b of vg.blanks) if (/oir/.test(b.prompt)) ok(!/se termine par -ir/.test(b.explanation), 'explication -oir : ' + b.explanation);
+for (const b of vg.blanks) if ((b.verb || b.prompt).endsWith('oir')) ok(!/se termine par -ir/.test(b.explanation), 'explication -oir : ' + b.explanation);
 ok(!vg.blanks.some(b => ['être', 'avoir'].includes(b.prompt)), 'pas d\'être/avoir');
 // Phrases « verbe conjugué » : toutes les combinaisons verbe × personne autorisée
 const conj = require('./load.cjs')('conjugaison.js');
@@ -59,4 +59,21 @@ for (let k = 0; k < 20; k++) {
 }
 const a5 = ex.pickConjAssignments({ config: { pool: 'accord' } }, 12, 'CE2');
 ok(a5.every(a => a.person === '3s' || a.person === '3p'), 'accord CE2 : 3e personne seulement');
+// Toutes les personnes dans les exercices de conjugaison
+for (const [pool, n] of [['present', 6], ['present', 12], ['present', 4], ['eter_eler', 6], ['eter_eler', 20], ['eter_eler', 3]]) {
+  for (let k = 0; k < 50; k++) {
+    const set = new Set(ex.pickConjAssignments({ config: { pool } }, n, 'CM2').map((a) => a.person));
+    ok(set.size === Math.min(6, n), `${pool} ${n} trous : ${set.size} personnes différentes`);
+  }
+}
+// Explications des erreurs au clavier
+const e1 = ex.explainTypedError({ verb: 'aboyer', person: '3p', subject: 'Les chiens', correct: 'aboient' }, 'aboyent');
+ok(/-oyer/.test(e1), 'explication -oyer : ' + e1);
+const e2 = ex.explainTypedError({ verb: 'aboyer', person: '3p', subject: 'Les chiens', correct: 'aboient' }, 'aboie');
+ok(/bonne forme pour/.test(e2) && /Les chiens/.test(e2), 'erreur d\'accord détectée : ' + e2);
+const e3 = ex.explainTypedError({ verb: 'venir', person: '3p', subject: 'ils', correct: 'viennent' }, 'vienent');
+ok(/irrégulier/.test(e3) && /ils viennent/.test(e3), 'tableau du verbe irrégulier : ' + e3);
+const cj = require('./load.cjs')('conjugaison.js');
+for (const g of Object.values(cj.POOLS)) for (const byDiff of Object.values(g)) for (const list of Object.values(byDiff)) for (const v of list)
+  for (const p of cj.PERSONS) ok(cj.explainForm(v, p).length > 10, `explication vide pour ${v} ${p}`);
 console.log(fail ? `${fail} échec(s)` : 'tout OK'); if (fail) process.exit(1);

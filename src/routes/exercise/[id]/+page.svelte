@@ -180,6 +180,25 @@
 				numBlanks={view.blanks.length}
 			/>
 
+			{#if ruleType === 'free_text'}
+				{@const errors = result.per_blank.filter((b) => !b.ok)}
+				{#if errors.length > 0}
+					<div class="card stack">
+						<h3>Tes erreurs expliquées</h3>
+						<ul class="explanations">
+							{#each errors as e (e.position)}
+								<li>
+									<span class="wrong">{e.given || '—'}</span> →
+									<strong class="right">{e.correct}</strong>
+									<span class="muted">({hintFor(e.position)})</span>
+									{#if e.explanation}<p>{e.explanation}</p>{/if}
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+			{/if}
+
 			<details class="card">
 				<summary>
 					{ruleType === 'qcm' ? 'Voir les corrections' : 'Voir le texte avec les corrections'}
@@ -312,6 +331,25 @@
 </section>
 
 <style>
+	.explanations {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3, 12px);
+	}
+	.explanations p {
+		margin: 4px 0 0;
+		font-size: 0.95em;
+	}
+	.explanations .wrong {
+		color: var(--color-error);
+		text-decoration: line-through;
+	}
+	.explanations .right {
+		color: var(--color-success);
+	}
 	.consigne {
 		margin: 0;
 		font-weight: 500;

@@ -462,13 +462,28 @@ function pickConjAssignments(rule, n, grade) {
 		for (const p of Object.keys(counts)) for (let k = 0; k < counts[p]; k++) list.push(p);
 		return shuffle(list);
 	};
+	// Conjugaison : chaque personne au moins une fois (dès 6 trous), le reste
+	// réparti selon les poids. En dessous de 6 trous : personnes toutes différentes.
+	const coveringPersons = (weights) => {
+		if (n >= conj.PERSONS.length) {
+			const rest = spread(n - conj.PERSONS.length, weights);
+			let list = conj.PERSONS.slice();
+			for (const p of Object.keys(rest)) for (let k = 0; k < rest[p]; k++) list.push(p);
+			return shuffle(list);
+		}
+		// Tirage pondéré sans remise.
+		const pool = Object.keys(weights).flatMap((p) => Array(weights[p]).fill(p));
+		const out = [];
+		for (const p of shuffle(pool)) if (!out.includes(p) && out.length < n) out.push(p);
+		return shuffle(out);
+	};
 
 	if (c.pool === 'eter_eler') {
 		const pool = conj.POOLS.eter_eler;
 		const half = Math.ceil(n / 2);
 		const verbs = shuffle(drawLeveled(pool.double, half, tier).concat(drawLeveled(pool.grave, n - half, tier)));
 		// Surtout des personnes où le verbe change (e muet), quelques nous/vous en piège.
-		const ps = persons({ '1s': 2, '2s': 2, '3s': 3, '3p': 3, '1p': 1, '2p': 1 });
+		const ps = coveringPersons({ '1s': 2, '2s': 2, '3s': 3, '3p': 3, '1p': 1, '2p': 1 });
 		return verbs.map((verb, i) => ({ verb, person: ps[i], category: eterElerCategory(verb, ps[i]) }));
 	}
 
@@ -488,7 +503,7 @@ function pickConjAssignments(rule, n, grade) {
 			category: ps[i] === '3s' ? 'sujet au singulier' : 'sujet au pluriel'
 		}));
 	}
-	const ps = persons({ '1s': 1, '2s': 1, '3s': 1, '1p': 1, '2p': 1, '3p': 1 });
+	const ps = coveringPersons({ '1s': 1, '2s': 1, '3s': 1, '1p': 1, '2p': 1, '3p': 1 });
 	return verbs.map((verb, i) => ({ verb, person: ps[i], category: presentCategory(verb) }));
 }
 
@@ -524,6 +539,12 @@ function callConj(cfg, rule, req, assignments, attemptIdx) {
 	const textLength = Math.min(60 + n * 14, 380);
 	const list = assignments.map((a, i) => `{{${i + 1}}} : « ${a.verb} », ${PERSON_HINT[a.person]}`).join('\n');
 	const focus = c.focus === 'accord' ? ACCORD_FOCUS[conj.levelTier(req.grade_level)] || ACCORD_FOCUS[2] : '';
+	// Conjugaison (pas l'accord, qui travaille justement les groupes nominaux) :
+	// on veut voir tous les pronoms personnels, sans sacrifier la cohérence.
+	const pronounRule =
+		c.focus === 'accord'
+			? ''
+			: "\n- PRONOMS : pour chaque personne présente dans la liste, essaie d'utiliser AU MOINS UNE FOIS le pronom sujet lui-même (je / j', tu, il ou elle ou on, nous, vous, ils ou elles) plutôt qu'un groupe nominal ; un dialogue entre les personnages aide pour « tu » et « vous ». Si ça rend l'histoire bancale, tu peux mettre un groupe nominal à la place (« les chiens » pour ils) : la cohérence du récit passe avant.";
 	const retryHint =
 		attemptIdx > 0
 			? "\n\n⚠️ Ta tentative précédente était invalide : vérifie que chaque marqueur est présent une seule fois, que chaque trou utilise le verbe et la personne imposés, que le sujet est bien à la bonne personne, et qu'il n'y a pas d'infinitif entre parenthèses."
@@ -541,7 +562,7 @@ RÈGLES DE FORME (très important) :
 - Le marqueur \`{{N}}\` remplace UNIQUEMENT la forme conjuguée du verbe (un seul mot) : le sujet, « ne », le pronom réfléchi (« nous nous {{2}} ») et les pronoms compléments restent écrits dans le texte.
 - N'écris jamais l'infinitif ni d'indice à côté du marqueur (pas de « {{1}} (jeter) ») : l'affichage l'ajoute.
 - Si le sujet est « je » et que le verbe commence par une voyelle ou un h muet, écris « j'{{N}} » (apostrophe collée au marqueur).
-- Le sujet de chaque trou doit être clairement à la personne demandée.
+- Le sujet de chaque trou doit être clairement à la personne demandée.${pronounRule}
 - Pour chaque trou, indique le verbe (à l'infinitif, sans « se »), la personne (1s, 2s, 3s, 1p, 2p, 3p) et le sujet tel qu'il est écrit dans le texte.${retryHint}
 
 Réponds UNIQUEMENT en appelant le tool submit_text.`;
@@ -684,6 +705,23 @@ function generate(cfg, rule, req, logger) {
 // Correction
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Explication d'une erreur au clavier, calculée par le conjugueur :
+ * - forme correcte mais d'une autre personne → erreur d'accord avec le sujet ;
+ * - sinon → la règle d'orthographe qui s'applique (ou le tableau du verbe).
+ */
+function explainTypedError(b, given) {
+	const persons = given ? conj.personsOfForm(b.verb, given, normalizeTyped) : [];
+	if (persons.length && !persons.includes(b.person)) {
+		const as = persons.map((p) => `« ${conj.PERSON_SHORT[p]} »`).join(' ou ');
+		const subject = b.subject && !/^(je|j'|tu|il|elle|on|nous|vous|ils|elles)$/i.test(b.subject.trim())
+			? `le sujet « ${b.subject} »`
+			: 'le sujet';
+		return `« ${given.trim()} » est la bonne forme pour ${as}. Ici, ${subject} est à la ${conj.PERSON_NAMES[b.person]} (${conj.PERSON_SHORT[b.person]}) : ${b.correct}.`;
+	}
+	return conj.explainForm(b.verb, b.person);
+}
+
 /** Normalisation d'une réponse tapée : casse, apostrophes, ponctuation finale. */
 function normalizeTyped(s) {
 	return g.normalizeWord(s).replace(/[.,;:!?]+$/, '').trim();
@@ -715,6 +753,9 @@ function grade(ruleType, exercise, responses) {
 		const entry = { position: b.position, given, correct: b.correct, ok, context };
 		if (variant) entry.variant = true;
 		if (b.explanation) entry.explanation = b.explanation;
+		if (ruleType === 'free_text' && !ok && b.verb && b.person) {
+			entry.explanation = explainTypedError(b, given);
+		}
 		per_blank.push(entry);
 		if (b.category) {
 			per_cat[b.category] = per_cat[b.category] || { ok: 0, total: 0 };
@@ -746,5 +787,6 @@ module.exports = {
 	validateConj,
 	validateQcm,
 	generateVerbGroups,
-	buildGroupSentence
+	buildGroupSentence,
+	explainTypedError
 };

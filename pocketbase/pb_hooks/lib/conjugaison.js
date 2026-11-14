@@ -235,6 +235,126 @@ function verbGroup(rawVerb) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Explications (affichées après une erreur, sans LLM)
+// ────────────────────────────────────────────────────────────────────────────
+const SUBJECT_OF = ['je', 'tu', 'il', 'nous', 'vous', 'ils'];
+const PERSON_SHORT = { '1s': 'je', '2s': 'tu', '3s': 'il / elle / on', '1p': 'nous', '2p': 'vous', '3p': 'ils / elles' };
+const PERSON_NAMES = {
+	'1s': '1re personne du singulier',
+	'2s': '2e personne du singulier',
+	'3s': '3e personne du singulier',
+	'1p': '1re personne du pluriel',
+	'2p': '2e personne du pluriel',
+	'3p': '3e personne du pluriel'
+};
+
+function bare(verb) {
+	return String(verb || '').trim().toLowerCase().replace(/^(se |s')/, '');
+}
+
+/** Particularité orthographique d'un verbe du 1er groupe (même logique que conjugateFirstGroup). */
+function firstGroupRule(verb) {
+	const stem = verb.slice(0, -2);
+	if (stem.endsWith('y')) {
+		const before = stem.slice(0, -1);
+		if (before.endsWith('a')) return 'ayer';
+		if (before.endsWith('o') || before.endsWith('u')) return 'oyer';
+		return 'eyer';
+	}
+	if (DOUBLE_ONLY.includes(verb)) return 'double';
+	if (GRAVE_ONLY.includes(verb)) return 'grave';
+	if (/[^aeiouyéèêëàâîïôûù]e[lt]$/.test(stem) || /que[lt]$/.test(stem)) return 'double_reform';
+	if (stem.length >= 3 && stem[stem.length - 2] === 'e' && !isVowel(stem[stem.length - 1]) && !isVowel(stem[stem.length - 3])) return 'e_grave';
+	if (/é((?:gu|qu|[^aeiouyéèêëàâîïôûù])+)$/.test(stem)) return 'e_acute';
+	return 'regular';
+}
+
+const REFLEXIVE_OF = ['me', 'te', 'se', 'nous', 'vous', 'se'];
+
+/** « je viens, tu viens, il vient, … » (élision de je / me / te / se). */
+function paradigm(rawVerb) {
+	const pronominal = /^(se |s')/.test(String(rawVerb).trim());
+	const forms = conjugate(bare(rawVerb));
+	if (!forms) return '';
+	const elide = (w, next) => (/^(je|me|te|se)$/.test(w) && isVowel(next[0]) ? `${w.slice(0, -1)}'` : `${w} `);
+	return forms
+		.map((f, i) => {
+			const v = f[0];
+			if (pronominal) return elide(SUBJECT_OF[i], REFLEXIVE_OF[i]) + elide(REFLEXIVE_OF[i], v) + v;
+			return elide(SUBJECT_OF[i], v) + v;
+		})
+		.join(', ');
+}
+
+/**
+ * Explication de la forme attendue pour (verbe, personne) : la règle qui
+ * s'applique, ou le tableau complet pour un verbe irrégulier.
+ */
+function explainForm(rawVerb, person) {
+	const verb = bare(rawVerb);
+	const shown = String(rawVerb || '').trim().toLowerCase(); // « s'asseoir »
+	const forms = conjugatePerson(verb, person);
+	if (!forms) return '';
+	const form = forms[0];
+	const group = verbGroup(verb);
+	const mute = person !== '1p' && person !== '2p';
+	const nous = (conjugatePerson(verb, '1p') || [''])[0];
+
+	if (group === 1) {
+		const rule = firstGroupRule(verb);
+		if (person === '1p' && verb.endsWith('cer')) {
+			return `Devant -ons, le c prend une cédille pour qu'on entende « s » et pas « k » : nous ${form}.`;
+		}
+		if (person === '1p' && verb.endsWith('ger')) {
+			return `Devant -ons, on garde un e après le g pour qu'on entende « j » et pas « g » : nous ${form}.`;
+		}
+		if (mute) {
+			switch (rule) {
+				case 'oyer':
+					return `Les verbes en -oyer et -uyer changent le y en i devant un e muet : ${form} (mais nous ${nous}).`;
+				case 'ayer':
+					return `Les verbes en -ayer acceptent les deux formes : ${forms.join(' ou ')} (et nous ${nous}).`;
+				case 'double':
+					return `« appeler », « jeter » et leurs dérivés doublent le l ou le t devant un e muet : ${form} (mais nous ${nous}).`;
+				case 'grave':
+					return `« ${verb} » prend un accent grave devant un e muet : ${form} (mais nous ${nous}).`;
+				case 'double_reform':
+					return `« ${verb} » double la consonne devant un e muet : ${forms[0]}${forms[1] ? ` (l'orthographe rectifiée accepte aussi ${forms[1]})` : ''} ; mais nous ${nous}.`;
+				case 'e_grave':
+					return `Le e de « ${verb} » devient è devant un e muet : ${form} (mais nous ${nous}).`;
+				case 'e_acute':
+					return `Le é de « ${verb} » devient è devant un e muet : ${form} (mais nous ${nous}).`;
+				default:
+					break;
+			}
+		} else if (['double', 'grave', 'double_reform', 'e_grave', 'e_acute'].includes(rule)) {
+			return `Avec nous et vous, la terminaison n'est pas muette : rien ne change dans le radical (nous ${nous}, vous ${(conjugatePerson(verb, '2p') || [''])[0]}).`;
+		} else if (rule === 'oyer' || rule === 'ayer') {
+			return `Avec nous et vous, on garde le y : nous ${nous}, vous ${(conjugatePerson(verb, '2p') || [''])[0]}.`;
+		}
+		return `Au présent, les verbes du 1er groupe se terminent par -e, -es, -e, -ons, -ez, -ent : ${paradigm(shown)}.`;
+	}
+	if (group === 2) {
+		return `Au présent, les verbes du 2e groupe se terminent par -is, -is, -it, -issons, -issez, -issent : ${paradigm(shown)}.`;
+	}
+	if (LIKE_ER.includes(verb)) {
+		return `« ${shown} » est du 3e groupe mais se conjugue au présent comme un verbe en -er : ${paradigm(shown)}.`;
+	}
+	if (DRE.includes(verb)) {
+		return `« ${shown} » (3e groupe) : -s, -s, (rien), -ons, -ez, -ent, le d reste à la 3e personne : ${paradigm(shown)}.`;
+	}
+	return `« ${shown} » est irrégulier au présent : ${paradigm(shown)}.`;
+}
+
+/** Personnes pour lesquelles `given` est une forme correcte du verbe. */
+function personsOfForm(rawVerb, given, normalize) {
+	const forms = conjugate(bare(rawVerb));
+	if (!forms) return [];
+	const n = normalize(given);
+	return PERSONS.filter((p, i) => forms[i].some((f) => normalize(f) === n));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Niveau scolaire → palier de difficulté
 // ────────────────────────────────────────────────────────────────────────────
 // Palier 1 (CP–CE2) : verbes très courants, réguliers, peu de pièges.
@@ -389,6 +509,10 @@ module.exports = {
 	conjugate,
 	conjugatePerson,
 	verbGroup,
+	explainForm,
+	personsOfForm,
+	PERSON_SHORT,
+	PERSON_NAMES,
 	levelTier,
 	conjugatedShare
 };
