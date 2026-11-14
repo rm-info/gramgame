@@ -1,9 +1,10 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
-// En dev, PocketBase tourne à côté (par défaut 127.0.0.1:8090) : on proxifie
-// l'API et l'admin pour rester en same-origin, comme en prod.
-const PB_URL = process.env.PB_URL ?? 'http://127.0.0.1:8090';
+// En dev, PocketBase tourne à côté (./pocketbase/run.sh, par défaut
+// 127.0.0.1:8092) : on proxifie l'API et l'admin pour rester en same-origin,
+// comme en prod. Pas 8090 : sur belzebold, c'est le PocketBase de phms.
+const PB_URL = process.env.PB_URL ?? 'http://127.0.0.1:8092';
 
 export default defineConfig({
 	plugins: [sveltekit()],

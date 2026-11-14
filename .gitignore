@@ -34,3 +34,6 @@ vite.config.ts.timestamp-*
 /pocketbase/pb_data
 /pocketbase/pb_public
 /pocketbase/.env
+
+# Cache local de la CLI Supabase (plus utilisée, projet migré vers PocketBase)
+/supabase/

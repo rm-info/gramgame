@@ -1,0 +1,10 @@
+node_modules
+.svelte-kit
+build
+.git
+.env
+supabase
+pocketbase/pocketbase
+pocketbase/pb_data
+pocketbase/pb_public
+pocketbase/.env

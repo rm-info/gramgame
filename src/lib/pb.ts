@@ -4,7 +4,8 @@ import PocketBase, { LocalAuthStore, type RecordModel } from 'pocketbase';
  * Client PocketBase singleton.
  *
  * L'app est toujours servie sur la même origine que l'API :
- *  - en prod, PocketBase sert lui-même le build statique (pb_public/) ;
+ *  - en prod, PocketBase sert lui-même le build statique (pb_public/, SPA :
+ *    index.html pour toute route inconnue) ;
  *  - en dev, vite proxifie /api et /_ vers PocketBase (cf. vite.config.ts).
  * D'où la base URL relative.
  */

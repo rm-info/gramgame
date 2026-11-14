@@ -33,6 +33,22 @@ La clé API LLM ne sort jamais du serveur : elle est dans `pocketbase/.env`, uti
 
 ## Installation sur le serveur
 
+Deux options : **image Docker** (front + PocketBase dans une seule image, c'est ce qui tourne sur belzebold) ou **binaire + systemd**.
+
+### Option A : Docker
+
+```sh
+docker build -t gramgame .          # contexte = racine du repo
+docker run -d --name gramgame --restart unless-stopped \
+  -p 127.0.0.1:8091:8090 \
+  --env-file pocketbase/.env \
+  -v "$PWD/pb_data:/pb/pb_data" gramgame
+```
+
+`--env-file` reçoit les mêmes variables que ci-dessous (`PB_HTTP` y est ignoré : le conteneur écoute sur `:8090`). Sur belzebold, le compose et le `.env` vivent dans le repo homelab (`compose/gramgame/`).
+
+### Option B : binaire + systemd
+
 Prérequis : `git`, `curl`, `unzip`, Node.js ≥ 20 (pour builder le front), Caddy.
 
 ```sh
@@ -112,13 +128,15 @@ Backup automatique quotidien (03h30, 7 conservés) dans `pocketbase/pb_data/back
 ```sh
 npm install
 ./pocketbase/install.sh        # 1ʳᵉ fois : binaire PocketBase + .env
-./pocketbase/run.sh            # PocketBase sur 127.0.0.1:8090
+./pocketbase/run.sh            # PocketBase de dev sur 127.0.0.1:8092
 npm run dev                    # vite sur :5174, proxifie /api et /_ vers PocketBase
 ```
 
-Pour un PocketBase sur un autre port : `PB_HTTP=127.0.0.1:8091 ./pocketbase/run.sh` et `PB_URL=http://127.0.0.1:8091 npm run dev`. Une instance de dev dans un clone séparé a ses propres données (`pb_data/` est par clone).
+Pour un PocketBase sur un autre port : `PB_HTTP=127.0.0.1:8093 ./pocketbase/run.sh` et `PB_URL=http://127.0.0.1:8093 npm run dev`. (Le défaut est 8092 et non 8090, qui est pris par un autre PocketBase sur belzebold.) Une instance de dev dans un clone séparé a ses propres données (`pb_data/` est par clone).
 
 Les hooks (`pb_hooks/`) sont rechargés automatiquement par PocketBase quand ils changent ; le front, lui, a besoin d'un `npm run build` pour être servi par PocketBase.
+
+Le front est une **SPA pure** (`ssr = false`, `prerender = false`) : le build ne produit qu'un `index.html`, que PocketBase renvoie pour toute route inconnue. Ne pas réactiver le prérendu : PocketBase ne sait pas servir `login.html` pour `/login`, il renverrait la page d'accueil.
 
 ## Modèle d'authentification
 
