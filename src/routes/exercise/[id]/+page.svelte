@@ -44,6 +44,12 @@
 	const severalGroups = $derived(
 		rule && rule.rule_type === 'multiple_choice' ? hasSeveralGroups(rule) : false
 	);
+	// QCM dont le mode difficile masque le passage surligné (ex. le GNS).
+	const hideHighlightMode = $derived(
+		rule?.rule_type === 'qcm' && rule.config?.hard_mode === 'hide_highlight'
+	);
+	const hardAvailable = $derived(severalGroups || hideHighlightMode);
+	const hardActive = $derived(hardMode && hardAvailable);
 	// Verrouillé dès la première réponse (sinon on pourrait « tricher » en
 	// passant en mode normal pour voir le groupe, puis revenir).
 	const hardModeLocked = $derived(Object.values(responses).some((v) => v !== null));
@@ -149,7 +155,7 @@
 			result = await correctAttempt({
 				exercise_id: exercise.id,
 				responses: payload,
-				hard_mode: hardMode && severalGroups
+				hard_mode: hardActive
 			});
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 		} catch (e) {
@@ -255,7 +261,7 @@
 				</p>
 			</header>
 
-			{#if severalGroups}
+			{#if hardAvailable}
 				<div class="mode-row">
 					<label class="mode-toggle" class:locked={hardModeLocked}>
 						<input
@@ -265,12 +271,20 @@
 							onchange={(e) => setHardMode((e.currentTarget as HTMLInputElement).checked)}
 						/>
 						<span>
-							<strong>Mode difficile</strong> : chaque trou propose tous les mots
-							({rule.candidates.join(', ')}).
+							<strong>Mode difficile</strong> :
+							{#if hideHighlightMode}
+								rien n'est surligné, à toi de trouver le passage concerné.
+							{:else}
+								chaque trou propose tous les mots ({rule.candidates.join(', ')}).
+							{/if}
 						</span>
 					</label>
 					<p class="muted small">
-						{#if hardMode}
+						{#if hideHighlightMode}
+							{hardMode
+								? 'Les corrections montreront le passage à trouver.'
+								: 'Le passage à observer est surligné dans chaque phrase.'}
+						{:else if hardMode}
 							Comme dans une dictée : à toi de trouver de quelle confusion il s'agit.
 						{:else}
 							Chaque trou ne propose que les mots qui se confondent :
@@ -284,9 +298,16 @@
 			{/if}
 
 			{#if ruleType === 'qcm'}
-				<p class="consigne">{view.text}</p>
+				<p class="consigne">
+					{hardActive && rule.config?.hard_consigne ? rule.config.hard_consigne : view.text}
+				</p>
 				<div class="card">
-					<QcmList items={view.blanks} options={rule.candidates} bind:responses />
+					<QcmList
+						items={view.blanks}
+						options={rule.candidates}
+						bind:responses
+						hideHighlight={hardActive && hideHighlightMode}
+					/>
 				</div>
 			{:else}
 				{#if ruleType === 'free_text'}
@@ -358,6 +379,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-1, 4px);
+		margin-bottom: var(--space-2, 8px);
 	}
 	.mode-toggle {
 		display: flex;

@@ -453,7 +453,9 @@
 							<code>verb_groups</code> : liste de verbes tirée au sort (sans IA) ·
 							<code>llm_qcm</code> : phrases écrites par l'IA (<code>check</code> :
 							<code>proche</code> | <code>pronom</code> pour vérifier ses réponses,
-							<code>highlight</code>, <code>balance</code>) · <code>conj_present</code> : verbes et
+							<code>highlight</code>, <code>balance</code> ; <code>"hard_mode": "hide_highlight"</code>
+							+ <code>hard_consigne</code> : le mode difficile ne surligne plus le passage) ·
+							<code>conj_present</code> : verbes et
 							personnes choisis par le serveur, réponses calculées (<code>pool</code> :
 							<code>present</code> | <code>eter_eler</code> | <code>accord</code>).
 						</span>

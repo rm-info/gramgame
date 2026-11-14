@@ -371,7 +371,12 @@ routerAdd(
 			candidates: g.jsonField(ruleRecord, 'candidates') || [],
 			groups: g.jsonField(ruleRecord, 'groups')
 		};
-		const hardMode = body.hard_mode === true && rule.rule_type === 'multiple_choice';
+		// Mode difficile : homophones (tous les candidats) ou QCM dont le passage
+		// surligné est masqué (config.hard_mode = 'hide_highlight').
+		const ruleConfig = g.jsonField(ruleRecord, 'config') || {};
+		const hardMode =
+			body.hard_mode === true &&
+			(rule.rule_type === 'multiple_choice' || ruleConfig.hard_mode === 'hide_highlight');
 
 		// Ne garde que des réponses texte courtes.
 		const responses = {};

@@ -9,9 +9,18 @@
 		responses: Record<number, string | null>;
 		readonly?: boolean;
 		results?: PerBlank[] | null;
+		/** Mode difficile : le passage [[ ]] n'est pas mis en évidence. */
+		hideHighlight?: boolean;
 	}
 
-	let { items, options, responses = $bindable(), readonly = false, results = null }: Props = $props();
+	let {
+		items,
+		options,
+		responses = $bindable(),
+		readonly = false,
+		results = null,
+		hideHighlight = false
+	}: Props = $props();
 
 	function resultFor(pos: number) {
 		return results?.find((r) => r.position === pos) ?? null;
@@ -24,7 +33,7 @@
 		<li class:ok={r?.ok === true} class:ko={r?.ok === false}>
 			<p class="prompt">
 				{#each highlightSegments(item.prompt ?? '') as seg, i (i)}
-					{#if seg.mark}<mark>{seg.text}</mark>{:else}{seg.text}{/if}
+					{#if seg.mark && !hideHighlight}<mark>{seg.text}</mark>{:else}{seg.text}{/if}
 				{/each}
 			</p>
 			<div class="choices" role="radiogroup" aria-label={`Question ${item.position}`}>

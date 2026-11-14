@@ -14,6 +14,10 @@ export interface RuleConfig {
 	balance?: boolean;
 	pool?: string;
 	focus?: string;
+	/** QCM : 'hide_highlight' = le mode difficile masque le passage [[ ]]. */
+	hard_mode?: 'hide_highlight';
+	/** Consigne affichée en mode difficile. */
+	hard_consigne?: string;
 }
 
 /**
