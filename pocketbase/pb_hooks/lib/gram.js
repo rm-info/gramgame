@@ -83,13 +83,6 @@ function sendOtp(app, user) {
 		}
 	}
 
-	if (isAccountLocked(app, user.id)) {
-		return {
-			status: 429,
-			error: 'Trop de codes erronés sur ce compte. Réessaie dans une heure.'
-		};
-	}
-
 	// Un seul code valide à la fois : les précédents sont invalidés.
 	for (const o of existing) {
 		try {
@@ -128,8 +121,9 @@ function sendOtp(app, user) {
 //
 // PocketBase limite déjà nativement à 5 essais par compte et par 3 min
 // (≈ 2400 essais/jour sur un compte ciblé). On ajoute un plafond de 10 échecs
-// par compte et par heure glissante : au-delà, plus de code envoyé ni accepté
-// pendant une heure. PocketBase valide le code AVANT les hooks
+// par compte et par heure glissante : au-delà, plus aucun code accepté pendant
+// une heure (l'envoi reste possible). Compromis assumé : quelqu'un qui connaît
+// un nom d'utilisateur peut bloquer ce compte 1 h (le natif : 3 min). PocketBase valide le code AVANT les hooks
 // onRecordAuthWithOTPRequest : le comptage se fait dans un middleware sur la
 // route auth-with-otp (pb_hooks/gramgame.pb.js).
 // ────────────────────────────────────────────────────────────────────────────
@@ -147,9 +141,13 @@ function isAccountLocked(app, userId) {
 }
 
 function recordOtpFailure(app, userId) {
-	const list = accountFails(app, userId);
-	list.push(Date.now());
-	app.store().set(`otpfail:${userId}`, list);
+	// setFunc : lecture-modification-écriture atomique (requêtes concurrentes).
+	app.store().setFunc(`otpfail:${userId}`, (old) => {
+		const now = Date.now();
+		const list = (old || []).filter((t) => now - t < OTP_ACCOUNT_WINDOW_MS);
+		list.push(now);
+		return list;
+	});
 }
 
 // ────────────────────────────────────────────────────────────────────────────

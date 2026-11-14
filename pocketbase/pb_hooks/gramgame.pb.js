@@ -75,7 +75,8 @@ onMailerRecordOTPSend((e) => {
 routerUse((e) => {
 	if (
 		e.request.method !== 'POST' ||
-		!/^\/api\/collections\/(users|_pb_users_auth_)\/auth-with-otp\/?$/.test(e.request.url.path)
+		// Toute collection (nom, id, casse…) : le compte est identifié par l'OTP.
+		!/^\/api\/collections\/[^/]+\/auth-with-otp\/?$/i.test(e.request.url.path)
 	) {
 		return e.next();
 	}
