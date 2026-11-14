@@ -75,7 +75,8 @@
 		{@const pos = i + 1}
 		{@const r = byPos.get(pos)}
 		{@const given = readonly ? (r?.given ?? responses[pos] ?? null) : (responses[pos] ?? null)}
-		<button
+		<span class="unit"
+			><button
 			type="button"
 			class="word"
 			class:active={!readonly && selected === pos}
@@ -86,7 +87,8 @@
 				>{:else if r.ok}<span class="mark right">{r.given}</span>{:else}{#if r.given}<span
 						class="mark wrong">{r.given}</span
 					>{/if}<span class="mark missed" title="Il manquait : {LABELS[r.correct]}">{r.correct}</span
-				>{/if}{:else if given}<span class="mark" class:pending={!readonly}>{given}</span>{/if}{' '}
+				>{/if}{:else if given}<span class="mark" class:pending={!readonly}>{given}</span>{/if}</span
+		>{' '}
 	{/each}
 </p>
 
@@ -119,6 +121,10 @@
 		font-family: var(--font-serif);
 		font-size: 1.15em;
 		line-height: 2.1;
+	}
+	/* Mot + signe insécables : le signe ne part jamais seul à la ligne. */
+	.unit {
+		white-space: nowrap;
 	}
 	.word {
 		width: auto;
