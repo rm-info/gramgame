@@ -138,7 +138,7 @@
 	}
 	.info {
 		display: grid;
-		grid-template-columns: max-content 1fr;
+		grid-template-columns: max-content minmax(0, 1fr);
 		gap: var(--space-2) var(--space-4);
 		margin: 0;
 	}
@@ -148,6 +148,21 @@
 	}
 	.info dd {
 		margin: 0;
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	@media (max-width: 480px) {
+		.info {
+			grid-template-columns: minmax(0, 1fr);
+			row-gap: 0;
+		}
+		.info dd {
+			margin-bottom: var(--space-3);
+		}
+		.info .note {
+			display: block;
+			margin-left: 0;
+		}
 	}
 	.note {
 		font-size: 0.9em;
