@@ -264,7 +264,7 @@
 
 			{#if submitting}
 				<p class="muted">
-					Cela peut prendre 5 à 15 secondes — l'IA écrit ton texte sur mesure et le vérifie.
+					Cela prend en général 30 secondes à 1 minute (parfois 2 ou 3 pour un long texte) : l'IA écrit ton texte sur mesure et le serveur le vérifie. Tu peux laisser la page ouverte et revenir plus tard : l'exercice sera aussi dans ta liste.
 				</p>
 			{/if}
 

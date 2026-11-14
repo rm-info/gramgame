@@ -22,7 +22,11 @@ ok(ex.personFromContext('Le soir, ils ', ' partent.', 'ils') === '3p', 'virgule 
 // Élision oubliée : « le {{1}} » devant appellent → refus ; « l'{{1}} » → OK.
 {
   const a1 = [{ verb: 'appeler', person: '3p', category: 'x' }];
-  ok(ex.validateConj({ text: 'Les habitants le {{1}} Gros Marteau.', blanks: [{ position: 1, verb: 'appeler', person: '3p', subject: 'Les habitants' }] }, a1).error, 'élision oubliée refusée');
+  const rep = ex.validateConj({ text: 'Les habitants le {{1}} Gros Marteau.', blanks: [{ position: 1, verb: 'appeler', person: '3p', subject: 'Les habitants' }] }, a1);
+  ok(!rep.error && rep.text === "Les habitants l'{{1}} Gros Marteau.", 'élision oubliée réparée : ' + (rep.error || rep.text));
+  const a2 = [{ verb: 'appeler', person: '3s', category: 'x' }, { verb: 'aimer', person: '1s', category: 'x' }];
+  const rep2 = ex.validateConj({ text: 'Elle me {{1}} souvent. Je {{2}} ça.', blanks: [{ position: 1, verb: 'appeler', person: '3s', subject: 'Elle' }, { position: 2, verb: 'aimer', person: '1s', subject: 'je' }] }, a2);
+  ok(!rep2.error && rep2.text === "Elle m'{{1}} souvent. J'{{2}} ça.", 'élisions me / je : ' + (rep2.error || rep2.text));
   ok(!ex.validateConj({ text: "Les habitants l'{{1}} Gros Marteau.", blanks: [{ position: 1, verb: 'appeler', person: '3p', subject: 'Les habitants' }] }, a1).error, 'élision OK');
 }
 // validateConj rejects wrong person in text

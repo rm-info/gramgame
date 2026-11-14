@@ -644,7 +644,7 @@ function validateConj(out, assignments) {
 	if (!Array.isArray(out.blanks) || out.blanks.length !== n) {
 		return fail(`Nombre de trous : attendu ${n}, reçu ${Array.isArray(out.blanks) ? out.blanks.length : 0}.`);
 	}
-	const text = out.text;
+	let text = out.text;
 	if (/\{\{\d+\}\}\s*\(/.test(text)) return fail("Indice entre parenthèses collé à un marqueur.");
 	const blanks = [];
 	const remaining = assignments.slice();
@@ -665,10 +665,12 @@ function validateConj(out, assignments) {
 		}
 		const accepted = conj.conjugatePerson(a.verb, a.person);
 		if (!accepted) return fail(`Verbe inconnu du conjugueur : ${a.verb}.`);
-		// Élision oubliée devant une forme qui commence par une voyelle (« le appellent »).
-		const unelided = text.slice(0, idx).match(/(?:^|[\s«"(])(je|me|te|se|le|la|ne)\s+$/i);
+		// Élision oubliée devant une forme qui commence par une voyelle (« le {{3}} »
+		// pour « appellent ») : on répare (« l'{{3}} ») plutôt que de tout regénérer.
+		const unelided = text.slice(0, idx).match(/(^|[\s«"(])(je|me|te|se|le|la|ne)(\s+)$/i);
 		if (unelided && /^[aeiouyàâéèêëîïôû]/i.test(accepted[0])) {
-			return fail(`Trou ${pos} : « ${unelided[1]} ${accepted[0]} » doit s'écrire « ${unelided[1].slice(0, -1)}'${accepted[0]} » (élision, marqueur collé à l'apostrophe).`);
+			const start = idx - unelided[2].length - unelided[3].length;
+			text = text.slice(0, start) + unelided[2].slice(0, -1) + "'" + text.slice(idx);
 		}
 		blanks.push({
 			position: pos,
@@ -683,7 +685,7 @@ function validateConj(out, assignments) {
 	// Pas de marqueur en trop.
 	const extra = (text.match(/\{\{(\d+)\}\}/g) || []).map((m) => Number(m.slice(2, -2))).filter((p) => p < 1 || p > n);
 	if (extra.length) return fail(`Marqueurs en trop : ${extra.join(', ')}.`);
-	return { blanks };
+	return { blanks, text };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -708,7 +710,7 @@ function generate(cfg, rule, req, logger) {
 			if (c.generator === 'conj_present') {
 				const out = callConj(cfg, rule, req, assignments, attempt);
 				const v = validateConj(out, assignments);
-				if (!v.error) return { text: out.text, blanks: v.blanks };
+				if (!v.error) return { text: v.text, blanks: v.blanks };
 				lastError = v.error;
 			} else {
 				const out = callQcm(cfg, rule, req, attempt);
