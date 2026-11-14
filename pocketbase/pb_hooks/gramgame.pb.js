@@ -203,6 +203,7 @@ routerAdd(
 			display_name: ruleRecord.getString('display_name'),
 			short_description: ruleRecord.getString('short_description'),
 			candidates: g.jsonField(ruleRecord, 'candidates') || [],
+			groups: g.jsonField(ruleRecord, 'groups'),
 			examples: g.jsonField(ruleRecord, 'examples')
 		};
 
@@ -213,7 +214,8 @@ routerAdd(
 		}
 
 		const MAX_ATTEMPTS = 3; // 1 essai + 2 retries
-		let exercise = null;
+		let blanks = null;
+		let exerciseText = '';
 		let lastError = '';
 		let providerStatus = null;
 
@@ -221,12 +223,13 @@ routerAdd(
 			try {
 				const candidate = g.callGenerate(cfg, rule, body, attempt);
 				const v = g.validateExercise(candidate, rule, body.num_blanks);
-				if (!v) {
-					exercise = candidate;
+				if (!v.error) {
+					blanks = v.blanks;
+					exerciseText = candidate.text;
 					break;
 				}
-				lastError = v;
-				e.app.logger().warn(`Génération : tentative ${attempt + 1} invalide`, 'error', v);
+				lastError = v.error;
+				e.app.logger().warn(`Génération : tentative ${attempt + 1} invalide`, 'error', v.error);
 			} catch (err) {
 				lastError = String((err && err.message) || err);
 				e.app.logger().warn(`Génération : tentative ${attempt + 1} échouée`, 'error', lastError);
@@ -238,7 +241,7 @@ routerAdd(
 			}
 		}
 
-		if (!exercise) {
+		if (!blanks) {
 			if (providerStatus === 429) {
 				return e.json(429, {
 					error:
@@ -264,10 +267,6 @@ routerAdd(
 			});
 		}
 
-		const blanks = exercise.blanks
-			.map((b) => ({ position: b.position, correct: b.correct, distractor: b.distractor }))
-			.sort((a, b) => a.position - b.position);
-
 		const record = new Record(e.app.findCollectionByNameOrId('exercises'));
 		record.set('owner', e.auth.id);
 		record.set('owner_username', e.auth.getString('username'));
@@ -275,7 +274,7 @@ routerAdd(
 		record.set('theme', body.theme.trim());
 		record.set('grade_level', body.grade_level);
 		record.set('num_blanks', body.num_blanks);
-		record.set('text', exercise.text);
+		record.set('text', exerciseText);
 		record.set('blanks', blanks);
 		record.set('llm_model', cfg.model);
 		record.set('verified', false);
@@ -289,7 +288,7 @@ routerAdd(
 
 		return e.json(200, {
 			id: record.id,
-			text: exercise.text,
+			text: exerciseText,
 			blanks: blanks.map((b) => ({ position: b.position })),
 			rule: { id: rule.id, display_name: rule.display_name, candidates: rule.candidates }
 		});
@@ -344,8 +343,11 @@ routerAdd(
 		}
 		const rule = {
 			display_name: ruleRecord.getString('display_name'),
-			short_description: ruleRecord.getString('short_description')
+			short_description: ruleRecord.getString('short_description'),
+			candidates: g.jsonField(ruleRecord, 'candidates') || [],
+			groups: g.jsonField(ruleRecord, 'groups')
 		};
+		const hardMode = body.hard_mode === true;
 
 		// Ne garde que des réponses texte courtes.
 		const responses = {};
@@ -354,7 +356,7 @@ routerAdd(
 			if (typeof v === 'string' && v.length <= 100 && /^\d{1,3}$/.test(k)) responses[k] = v;
 		}
 
-		const grading = g.grade(exercise, responses);
+		const grading = g.grade(exercise, responses, rule);
 		if (grading.score_total === 0) {
 			return e.json(400, { error: 'Aucune réponse fournie.' });
 		}
@@ -376,7 +378,13 @@ routerAdd(
 		attempt.set('responses', responses);
 		attempt.set('score', grading.score);
 		attempt.set('score_total', grading.score_total);
-		attempt.set('per_rule_breakdown', grading.per_rule_breakdown);
+		// Détail par confusion rangé sous la règle (pour les stats de maîtrise).
+		const breakdown = grading.per_rule_breakdown;
+		if (Object.keys(grading.per_group_breakdown).length) {
+			breakdown[exercise.rule].groups = grading.per_group_breakdown;
+		}
+		attempt.set('per_rule_breakdown', breakdown);
+		attempt.set('hard_mode', hardMode);
 		attempt.set('appreciation', appreciation);
 
 		try {
@@ -391,6 +399,8 @@ routerAdd(
 			score_total: grading.score_total,
 			per_blank: grading.per_blank,
 			per_rule_breakdown: grading.per_rule_breakdown,
+			per_group_breakdown: grading.per_group_breakdown,
+			hard_mode: hardMode,
 			appreciation,
 			suggested_next_rule_id: grading.suggested_next_rule_id
 		});
@@ -487,3 +497,25 @@ cronAdd('gram_purge_unverified', '17 4 * * *', () => {
 	}
 	if (stale.length) $app.logger().info('Comptes non activés purgés', 'count', stale.length);
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Règles : cohérence des groupes de confusion avec les candidats
+// ────────────────────────────────────────────────────────────────────────────
+onRecordCreateRequest((e) => {
+	const g = require(`${__hooks}/lib/gram.js`);
+	const candidates = g.jsonField(e.record, 'candidates');
+	const groups = g.jsonField(e.record, 'groups');
+	const err = g.validateRuleGroups(candidates, groups);
+	if (err) throw new BadRequestError(err);
+	e.record.set('groups', g.canonicalGroups(candidates, groups));
+	e.next();
+}, 'rules');
+onRecordUpdateRequest((e) => {
+	const g = require(`${__hooks}/lib/gram.js`);
+	const candidates = g.jsonField(e.record, 'candidates');
+	const groups = g.jsonField(e.record, 'groups');
+	const err = g.validateRuleGroups(candidates, groups);
+	if (err) throw new BadRequestError(err);
+	e.record.set('groups', g.canonicalGroups(candidates, groups));
+	e.next();
+}, 'rules');

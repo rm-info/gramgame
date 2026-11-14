@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { pb, errorMessage } from '$lib/pb';
+	import { normalizeWord, parseGroupsText, groupsToText, groupLabel } from '$lib/confusion';
 	import { activeUsername } from '$lib/active-username.svelte';
 
 	type RuleType = 'multiple_choice' | 'free_text';
@@ -18,6 +19,7 @@
 		short_description: string;
 		rule_type: RuleType;
 		candidates: string[];
+		groups: string[][] | null;
 		difficulty_hint: string | null;
 		examples: RuleExample[] | null;
 	}
@@ -30,6 +32,8 @@
 		short_description: string;
 		rule_type: RuleType;
 		candidates: string[];
+		/** Une ligne par groupe de confusion : « on / ont » */
+		groupsText: string;
 		difficulty_hint: string;
 		examples: RuleExample[];
 	}
@@ -63,10 +67,12 @@
 		try {
 			const data = await pb.collection('rules').getFullList({
 				sort: 'id',
-				fields: 'id,display_name,short_description,rule_type,candidates,difficulty_hint,examples'
+				fields:
+					'id,display_name,short_description,rule_type,candidates,groups,difficulty_hint,examples'
 			});
 			rules = data.map((r) => ({
 				...(r as unknown as Rule),
+				groups: Array.isArray(r.groups) && r.groups.length > 0 ? r.groups : null,
 				difficulty_hint: r.difficulty_hint || null,
 				examples: Array.isArray(r.examples) ? r.examples : null
 			}));
@@ -85,6 +91,7 @@
 			short_description: '',
 			rule_type: 'multiple_choice',
 			candidates: [],
+			groupsText: '',
 			difficulty_hint: '',
 			examples: []
 		};
@@ -106,6 +113,7 @@
 			short_description: r.short_description,
 			rule_type: r.rule_type,
 			candidates: [...r.candidates],
+			groupsText: groupsToText(r.groups),
 			difficulty_hint: r.difficulty_hint ?? '',
 			examples: (r.examples ?? []).map((e) => ({ ...e }))
 		};
@@ -123,6 +131,7 @@
 			short_description: r.short_description,
 			rule_type: r.rule_type,
 			candidates: [...r.candidates],
+			groupsText: groupsToText(r.groups),
 			difficulty_hint: r.difficulty_hint ?? '',
 			examples: (r.examples ?? []).map((e) => ({ ...e }))
 		};
@@ -170,6 +179,25 @@
 		form.examples = form.examples.filter((_, i) => i !== idx);
 	}
 
+	/** Même contrôle que le serveur (pb_hooks : validateRuleGroups). */
+	function validateGroups(candidates: string[], groups: string[][]): string | null {
+		if (groups.length === 0) return null;
+		const cands = candidates.map(normalizeWord);
+		const seen = new Set<string>();
+		for (const g of groups) {
+			if (g.length < 2) return `Groupe « ${g.join(' / ')} » : il faut au moins 2 mots.`;
+			for (const w of g) {
+				const n = normalizeWord(w);
+				if (!cands.includes(n)) return `« ${w} » est dans un groupe mais pas dans les candidats.`;
+				if (seen.has(n)) return `« ${w} » apparaît dans plusieurs groupes.`;
+				seen.add(n);
+			}
+		}
+		const missing = candidates.filter((c) => !seen.has(normalizeWord(c)));
+		if (missing.length) return `Candidats sans groupe : ${missing.join(', ')}.`;
+		return null;
+	}
+
 	function validateForm(): string | null {
 		if (!form) return 'Pas de formulaire actif.';
 		if (!/^[a-z0-9-]+$/.test(form.id)) {
@@ -184,6 +212,8 @@
 		if (form.rule_type !== 'multiple_choice') {
 			return 'Seul le type "multiple_choice" est implémenté pour l\'instant.';
 		}
+		const groupsError = validateGroups(form.candidates, parseGroupsText(form.groupsText));
+		if (groupsError) return groupsError;
 		for (const ex of form.examples) {
 			if (!ex.sentence.trim()) return 'Un exemple a une phrase vide.';
 			if (!ex.answer || !form.candidates.includes(ex.answer)) {
@@ -210,6 +240,10 @@
 			short_description: form.short_description.trim(),
 			rule_type: form.rule_type,
 			candidates: form.candidates,
+			groups: (() => {
+				const g = parseGroupsText(form.groupsText);
+				return g.length > 0 ? g : null;
+			})(),
 			difficulty_hint: form.difficulty_hint.trim() || null,
 			examples: form.examples.length > 0 ? form.examples : null
 		};
@@ -378,6 +412,20 @@
 					<span class="muted small">2 candidats minimum. Pour les homophones binaires : exactement 2.</span>
 				</div>
 
+				<label class="full">
+					<span class="label-text">Groupes de confusion (optionnel)</span>
+					<textarea
+						rows="3"
+						bind:value={form.groupsText}
+						placeholder={'on / ont\nson / sont\net / es / est'}
+					></textarea>
+					<span class="muted small">
+						Une ligne par groupe de mots qui se confondent, séparés par « / ». Chaque candidat doit
+						être dans exactement un groupe. En mode normal, chaque trou ne propose que les mots de son
+						groupe ; en mode difficile, tous les candidats. Vide = un seul groupe (tous les candidats).
+					</span>
+				</label>
+
 				<div class="full">
 					<div class="row-between">
 						<span class="label-text">Exemples positifs (phrases où la règle s'applique)</span>
@@ -453,7 +501,11 @@
 							</div>
 							<div class="muted rule-desc">{r.short_description}</div>
 							<div class="muted small">
-								Candidats : {r.candidates.join(', ')}
+								{#if r.groups}
+									Confusions : {r.groups.map(groupLabel).join(' · ')}
+								{:else}
+									Candidats : {r.candidates.join(', ')}
+								{/if}
 								{#if r.difficulty_hint}
 									· Niveau : {r.difficulty_hint}
 								{/if}

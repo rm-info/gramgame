@@ -8,7 +8,8 @@ import type { RecordModel } from 'pocketbase';
 export interface BlankRow {
 	position: number;
 	correct: string;
-	distractor: string;
+	/** Ancien format (avant les groupes de confusion) — ignoré. */
+	distractor?: string;
 }
 
 export interface ExerciseRow {
@@ -25,7 +26,7 @@ export interface ExerciseRow {
 	verified: boolean;
 	verified_at: string | null;
 	verified_by_username: string | null;
-	rule: { id: string; display_name: string; candidates: string[] } | null;
+	rule: { id: string; display_name: string; candidates: string[]; groups: string[][] | null } | null;
 }
 
 export function mapExercise(r: RecordModel): ExerciseRow {
@@ -48,7 +49,8 @@ export function mapExercise(r: RecordModel): ExerciseRow {
 			? {
 					id: rule.id,
 					display_name: rule.display_name,
-					candidates: Array.isArray(rule.candidates) ? rule.candidates : []
+					candidates: Array.isArray(rule.candidates) ? rule.candidates : [],
+					groups: Array.isArray(rule.groups) ? rule.groups : null
 				}
 			: null
 	};

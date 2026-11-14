@@ -6,11 +6,11 @@
 	import { pb, errorMessage } from '$lib/pb';
 	import { mapExercise, type ExerciseRow } from '$lib/data';
 	import { activeUsername } from '$lib/active-username.svelte';
+	import { ruleGroups, groupLabel } from '$lib/confusion';
 
 	interface BlankRow {
 		position: number;
 		correct: string;
-		distractor: string;
 	}
 
 	interface ExerciseData {
@@ -30,6 +30,7 @@
 		id: string;
 		display_name: string;
 		candidates: string[];
+		groups: string[][] | null;
 	}
 
 	let exerciseId = $derived(page.params.id);
@@ -78,8 +79,10 @@
 		}
 		exercise = ex as ExerciseData;
 		editText = exercise.text;
+		// On ne garde que position + bonne réponse (l'ancien champ distractor
+		// est abandonné : les options viennent des groupes de la règle).
 		editBlanks = exercise.blanks
-			.map((b) => ({ ...b }))
+			.map((b) => ({ position: b.position, correct: b.correct }))
 			.sort((a, b) => a.position - b.position);
 		editVerified = exercise.verified;
 
@@ -97,24 +100,13 @@
 		let pos = 1;
 		while (usedPositions.has(pos)) pos++;
 		const cands = rule?.candidates ?? [];
-		editBlanks = [
-			...editBlanks,
-			{
-				position: pos,
-				correct: cands[0] ?? '',
-				distractor: cands[1] ?? cands[0] ?? ''
-			}
-		].sort((a, b) => a.position - b.position);
+		editBlanks = [...editBlanks, { position: pos, correct: cands[0] ?? '' }].sort(
+			(a, b) => a.position - b.position
+		);
 	}
 
 	function removeBlank(position: number) {
 		editBlanks = editBlanks.filter((b) => b.position !== position);
-	}
-
-	function swapCorrectDistractor(position: number) {
-		editBlanks = editBlanks.map((b) =>
-			b.position === position ? { ...b, correct: b.distractor, distractor: b.correct } : b
-		);
 	}
 
 	async function handleSave() {
@@ -220,7 +212,6 @@
 								<tr>
 									<th>Position</th>
 									<th>Bonne réponse</th>
-									<th>Distracteur</th>
 									<th></th>
 								</tr>
 							</thead>
@@ -230,27 +221,16 @@
 										<td><code>{`{{${b.position}}}`}</code></td>
 										<td>
 											<select bind:value={b.correct}>
-												{#each rule.candidates as c (c)}
-													<option value={c}>{c}</option>
-												{/each}
-											</select>
-										</td>
-										<td>
-											<select bind:value={b.distractor}>
-												{#each rule.candidates as c (c)}
-													<option value={c}>{c}</option>
+												{#each ruleGroups(rule) as g (groupLabel(g))}
+													<optgroup label={groupLabel(g)}>
+														{#each g as c (c)}
+															<option value={c}>{c}</option>
+														{/each}
+													</optgroup>
 												{/each}
 											</select>
 										</td>
 										<td class="actions">
-											<button
-												type="button"
-												class="link"
-												title="Inverser bonne réponse / distracteur"
-												onclick={() => swapCorrectDistractor(b.position)}
-											>
-												⇄
-											</button>
 											<button
 												type="button"
 												class="link danger"

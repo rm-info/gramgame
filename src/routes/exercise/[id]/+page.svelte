@@ -9,11 +9,13 @@
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { correctAttempt, type CorrectionResult } from '$lib/api/correct';
 	import { truncateExercise } from '$lib/truncate-exercise';
+	import { hasSeveralGroups, optionsForBlank, ruleGroups, groupLabel } from '$lib/confusion';
+
+	const HARD_MODE_KEY = 'gramgame.hard_mode';
 
 	interface BlankRow {
 		position: number;
 		correct: string;
-		distractor: string;
 	}
 
 	interface ExerciseData {
@@ -33,6 +35,7 @@
 		id: string;
 		display_name: string;
 		candidates: string[];
+		groups: string[][] | null;
 	}
 
 	let exercise = $state<ExerciseData | null>(null);
@@ -44,6 +47,37 @@
 	let submitting = $state(false);
 	let submitError = $state<string | null>(null);
 	let result = $state<CorrectionResult | null>(null);
+
+	// Mode difficile : chaque trou propose tous les mots de la règle au lieu
+	// du seul groupe de confusion concerné. Mémorisé d'un exercice à l'autre.
+	let hardMode = $state(readHardMode());
+	const severalGroups = $derived(rule ? hasSeveralGroups(rule) : false);
+	// Verrouillé dès la première réponse (sinon on pourrait « tricher » en
+	// passant en mode normal pour voir le groupe, puis revenir).
+	const hardModeLocked = $derived(Object.values(responses).some((v) => v !== null));
+
+	function readHardMode(): boolean {
+		try {
+			return localStorage.getItem(HARD_MODE_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+
+	function setHardMode(v: boolean) {
+		hardMode = v;
+		try {
+			localStorage.setItem(HARD_MODE_KEY, v ? '1' : '0');
+		} catch {
+			// stockage indisponible : réglage limité à cette page
+		}
+	}
+
+	function optionsFor(position: number): string[] {
+		if (!rule || !exercise) return [];
+		const blank = exercise.blanks.find((b) => b.position === position);
+		return optionsForBlank(rule, blank?.correct ?? '', hardMode && severalGroups);
+	}
 
 	const exerciseId = $derived(page.params.id);
 	const maxParam = $derived(Number(page.url.searchParams.get('max')) || 0);
@@ -104,7 +138,8 @@
 		try {
 			result = await correctAttempt({
 				exercise_id: exercise.id,
-				responses: payload
+				responses: payload,
+				hard_mode: hardMode && severalGroups
 			});
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 		} catch (e) {
@@ -128,6 +163,7 @@
 			<ResultView
 				{result}
 				ruleId={exercise.rule_id}
+				ruleName={rule.display_name}
 				theme={exercise.theme}
 				gradeLevel={exercise.grade_level}
 				numBlanks={view.blanks.length}
@@ -139,7 +175,7 @@
 					<ExerciseText
 						text={view.text}
 						blankPositions={view.blanks.map((b) => b.position)}
-						options={rule.candidates}
+						{optionsFor}
 						bind:responses
 						readonly
 						results={result.per_blank}
@@ -175,11 +211,39 @@
 				</p>
 			</header>
 
+			{#if severalGroups}
+				<div class="mode-row">
+					<label class="mode-toggle" class:locked={hardModeLocked}>
+						<input
+							type="checkbox"
+							checked={hardMode}
+							disabled={hardModeLocked}
+							onchange={(e) => setHardMode((e.currentTarget as HTMLInputElement).checked)}
+						/>
+						<span>
+							<strong>Mode difficile</strong> : chaque trou propose tous les mots
+							({rule.candidates.join(', ')}).
+						</span>
+					</label>
+					<p class="muted small">
+						{#if hardMode}
+							Comme dans une dictée : à toi de trouver de quelle confusion il s'agit.
+						{:else}
+							Chaque trou ne propose que les mots qui se confondent :
+							{ruleGroups(rule).map(groupLabel).join(' · ')}.
+						{/if}
+						{#if hardModeLocked}
+							(Choix verrouillé une fois l'exercice commencé.)
+						{/if}
+					</p>
+				</div>
+			{/if}
+
 			<div class="card">
 				<ExerciseText
 					text={view.text}
 					{blankPositions}
-					options={rule.candidates}
+					{optionsFor}
 					bind:responses
 				/>
 			</div>
@@ -208,6 +272,31 @@
 </section>
 
 <style>
+	.mode-row {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1, 4px);
+	}
+	.mode-toggle {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-2, 8px);
+		cursor: pointer;
+	}
+	.mode-toggle input {
+		width: auto;
+		margin-top: 3px;
+	}
+	.mode-row p {
+		margin: 0 0 0 calc(13px + var(--space-2, 8px));
+	}
+	.mode-toggle.locked {
+		cursor: default;
+		opacity: 0.8;
+	}
+	.small {
+		font-size: 0.9em;
+	}
 	.actions {
 		display: flex;
 		align-items: center;
