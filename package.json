@@ -10,7 +10,7 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test:server": "node pocketbase/tests/conjugaison.test.cjs && node pocketbase/tests/exercises.test.cjs && node pocketbase/tests/span_punct.test.cjs"
+		"test:server": "node pocketbase/tests/conjugaison.test.cjs && node pocketbase/tests/exercises.test.cjs && node pocketbase/tests/span_punct.test.cjs && node pocketbase/tests/transform.test.cjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.0",

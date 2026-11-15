@@ -227,6 +227,20 @@ routerAdd(
 		let llmModel = cfg.model;
 		let extra = null;
 
+		if (rule.rule_type === 'transform') {
+			// Transformations de phrases : lib/transform.js (retries inclus).
+			const tf = require(`${__hooks}/lib/transform.js`);
+			try {
+				const out = tf.generate(cfg, rule, body, e.app.logger());
+				blanks = out.blanks;
+				exerciseText = out.text;
+			} catch (err) {
+				lastError = String((err && err.message) || err);
+				if (err && err.providerStatus !== undefined) providerStatus = err.providerStatus;
+				else if (!err || !err.invalid) e.app.logger().error('Génération : erreur inattendue', 'error', lastError);
+			}
+		}
+
 		if (rule.rule_type === 'span' || rule.rule_type === 'punctuation') {
 			// GNS à cliquer, ponctuation : lib/span_punct.js (retries inclus).
 			const sp = require(`${__hooks}/lib/span_punct.js`);
@@ -395,13 +409,17 @@ routerAdd(
 		const ruleConfig = g.jsonField(ruleRecord, 'config') || {};
 		const hardMode =
 			body.hard_mode === true &&
-			(rule.rule_type === 'multiple_choice' || ruleConfig.hard_mode === 'hide_highlight');
+			(rule.rule_type === 'multiple_choice' ||
+				rule.rule_type === 'transform' ||
+				ruleConfig.hard_mode === 'hide_highlight');
 
 		// Ne garde que des réponses texte courtes.
 		const responses = {};
 		for (const k of Object.keys(body.responses)) {
 			const v = body.responses[k];
-			if (typeof v === 'string' && v.length <= 100 && /^\d{1,3}$/.test(k)) responses[k] = v;
+			// Transformations : une phrase entière ; ailleurs, un mot ou des indices.
+			const maxLen = rule.rule_type === 'transform' ? 300 : 100;
+			if (typeof v === 'string' && v.length <= maxLen && /^\d{1,3}$/.test(k)) responses[k] = v;
 		}
 
 		let grading;
@@ -409,6 +427,15 @@ routerAdd(
 			grading = require(`${__hooks}/lib/exercises.js`).grade(rule.rule_type, exercise, responses);
 		} else if (rule.rule_type === 'span') {
 			grading = require(`${__hooks}/lib/span_punct.js`).gradeSpan(exercise, responses);
+		} else if (rule.rule_type === 'transform') {
+			// Mode difficile = réponses écrites, corrigées par l'IA après des contrôles sans IA.
+			grading = require(`${__hooks}/lib/transform.js`).gradeTransform(
+				exercise,
+				responses,
+				hardMode,
+				g.llmConfig(),
+				e.app.logger()
+			);
 		} else if (rule.rule_type === 'punctuation') {
 			grading = require(`${__hooks}/lib/span_punct.js`).gradePunctuation(exercise, responses, exercise.extra);
 		} else {
@@ -598,6 +625,41 @@ onRecordUpdateRequest((e) => {
 			const it = items[i] || {};
 			const item = sp.buildSpanItem(it.prompt, it.kind, it.explanation, i + 1);
 			if (item.error) throw new BadRequestError(`Phrase ${i + 1} : ${item.error}.`);
+			blanks.push(item);
+		}
+		if (!blanks.length) throw new BadRequestError('Il faut au moins une phrase.');
+		e.record.set('blanks', blanks);
+		e.record.set('num_blanks', blanks.length);
+	} else if (ruleType === 'transform') {
+		// Édition prof : chaque question est revalidée (références correctes,
+		// 3 propositions dont la bonne en premier).
+		const tf = require(`${__hooks}/lib/transform.js`);
+		const items = g.jsonField(e.record, 'blanks') || [];
+		const blanks = [];
+		for (let i = 0; i < items.length; i++) {
+			const it = items[i] || {};
+			const options = Array.isArray(it.options) ? it.options : [];
+			const item = tf.buildItem(
+				{
+					source: it.source,
+					target: it.target,
+					references: it.references,
+					wrong_options: options.slice(1),
+					explanation: it.explanation
+				},
+				i + 1,
+				null
+			);
+			if (item.error) throw new BadRequestError(`Phrase ${i + 1} : ${item.error}.`);
+			// La bonne proposition du QCM est la 1re : on la garde telle que saisie.
+			if (options[0] && String(options[0]).trim()) {
+				const first = String(options[0]).replace(/\s+/g, ' ').trim();
+				if (!item.references.some((r) => tf.normSentence(r) === tf.normSentence(first))) {
+					throw new BadRequestError(`Phrase ${i + 1} : la 1re proposition doit faire partie des réponses acceptées.`);
+				}
+				item.options[0] = first;
+				item.correct = first;
+			}
 			blanks.push(item);
 		}
 		if (!blanks.length) throw new BadRequestError('Il faut au moins une phrase.');

@@ -19,6 +19,10 @@ export interface PerBlank {
 	given_indices?: string;
 	/** ponctuation : signe ajouté là où il n'en fallait pas. */
 	extra?: boolean;
+	/** transform (écriture) : retour pour l'élève, qui l'a jugé, doute éventuel. */
+	feedback?: string;
+	judged_by?: 'rules' | 'ia' | 'none';
+	uncertain?: boolean;
 }
 
 export interface CorrectionResult {

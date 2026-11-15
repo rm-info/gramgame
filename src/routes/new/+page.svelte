@@ -14,7 +14,7 @@
 		id: string;
 		display_name: string;
 		short_description: string;
-		rule_type: 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation';
+		rule_type: 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation' | 'transform';
 		category: string;
 		config: { generator?: string } | null;
 	}
@@ -136,7 +136,7 @@
 
 	function unitOf(type: string | undefined): string {
 		if (type === 'qcm') return 'questions';
-		if (type === 'span' || type === 'punctuation') return 'phrases';
+		if (type === 'span' || type === 'punctuation' || type === 'transform') return 'phrases';
 		return 'trous';
 	}
 	const rulesByCategory = $derived(

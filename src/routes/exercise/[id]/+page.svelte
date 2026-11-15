@@ -10,6 +10,7 @@
 	import QcmList from '$lib/components/QcmList.svelte';
 	import SpanSelectList from '$lib/components/SpanSelectList.svelte';
 	import PunctuationText from '$lib/components/PunctuationText.svelte';
+	import TransformList from '$lib/components/TransformList.svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { correctAttempt, type CorrectionResult } from '$lib/api/correct';
 	import { truncateExercise } from '$lib/truncate-exercise';
@@ -55,7 +56,9 @@
 	const hideHighlightMode = $derived(
 		rule?.rule_type === 'qcm' && rule.config?.hard_mode === 'hide_highlight'
 	);
-	const hardAvailable = $derived(severalGroups || hideHighlightMode);
+	// Transformations : mode difficile = écrire soi-même la phrase transformée.
+	const writingMode = $derived(rule?.rule_type === 'transform');
+	const hardAvailable = $derived(severalGroups || hideHighlightMode || writingMode);
 	const hardActive = $derived(hardMode && hardAvailable);
 	// Verrouillé dès la première réponse (sinon on pourrait « tricher » en
 	// passant en mode normal pour voir le groupe, puis revenir).
@@ -92,7 +95,11 @@
 	}
 
 	const unit = $derived(
-		ruleType === 'qcm' ? 'questions' : ruleType === 'span' || ruleType === 'punctuation' ? 'phrases' : 'trous'
+		ruleType === 'qcm'
+			? 'questions'
+			: ruleType === 'span' || ruleType === 'punctuation' || ruleType === 'transform'
+				? 'phrases'
+				: 'trous'
 	);
 	// Ponctuation : réponses indexées par mot (pas par trou) ; on compte les phrases.
 	const isPunct = $derived(ruleType === 'punctuation');
@@ -116,7 +123,7 @@
 		// Ponctuation : le texte entier, pas de version courte.
 		if (ruleType === 'punctuation') return { text: exercise.text, blanks: exercise.blanks };
 		// QCM, GNS : on garde simplement les N premières questions.
-		if (ruleType === 'qcm' || ruleType === 'span') {
+		if (ruleType === 'qcm' || ruleType === 'span' || ruleType === 'transform') {
 			const sorted = [...exercise.blanks].sort((a, b) => a.position - b.position);
 			return { text: exercise.text, blanks: sorted.slice(0, effective) };
 		}
@@ -295,7 +302,15 @@
 						: 'Voir le texte avec les corrections'}
 				</summary>
 				<div style="margin-top: var(--space-4);">
-					{#if ruleType === 'span'}
+					{#if ruleType === 'transform'}
+						<TransformList
+							items={view.blanks}
+							bind:responses
+							writing={!!result.hard_mode}
+							readonly
+							results={result.per_blank}
+						/>
+					{:else if ruleType === 'span'}
 						<SpanSelectList items={view.blanks} bind:responses readonly results={result.per_blank} />
 					{:else if ruleType === 'punctuation'}
 						<PunctuationText {words} bind:responses readonly results={result.per_blank} />
@@ -370,7 +385,9 @@
 						/>
 						<span>
 							<strong>Mode difficile</strong> :
-							{#if hideHighlightMode}
+							{#if writingMode}
+								tu écris toi-même la phrase transformée (corrigée par l'IA).
+							{:else if hideHighlightMode}
 								rien n'est surligné, à toi de trouver le passage concerné.
 							{:else}
 								chaque trou propose tous les mots ({rule.candidates.join(', ')}).
@@ -378,7 +395,11 @@
 						</span>
 					</label>
 					<p class="muted small">
-						{#if hideHighlightMode}
+						{#if writingMode}
+							{hardMode
+								? "Ta phrase est d'abord vérifiée par l'appli (ponctuation, négation…), puis corrigée par l'IA."
+								: 'Tu choisis la bonne phrase parmi trois propositions.'}
+						{:else if hideHighlightMode}
 							{hardMode
 								? 'Les corrections montreront le passage à trouver.'
 								: 'Le passage à observer est surligné dans chaque phrase.'}
@@ -395,7 +416,18 @@
 				</div>
 			{/if}
 
-			{#if ruleType === 'span'}
+			{#if ruleType === 'transform'}
+				<p class="consigne">
+					{hardActive
+						? 'Écris chaque phrase transformée comme demandé, avec la bonne ponctuation.'
+						: 'Pour chaque phrase, choisis la bonne transformation.'}
+				</p>
+				<div class="card">
+					{#key hardActive}
+						<TransformList items={view.blanks} bind:responses writing={hardActive} />
+					{/key}
+				</div>
+			{:else if ruleType === 'span'}
 				<p class="consigne">{view.text}</p>
 				<div class="card">
 					<SpanSelectList items={view.blanks} bind:responses />
@@ -451,8 +483,10 @@
 				</button>
 				{#if !allFilled}
 					<span class="muted">
-						{ruleType === 'qcm'
+						{ruleType === 'qcm' || (ruleType === 'transform' && !hardActive)
 							? 'Réponds à toutes les questions pour valider.'
+							: ruleType === 'transform'
+								? 'Écris toutes les phrases pour valider.'
 							: ruleType === 'span'
 								? 'Choisis des mots dans chaque phrase pour valider.'
 								: isPunct
