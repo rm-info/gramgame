@@ -5,10 +5,10 @@ import type { RecordModel } from 'pocketbase';
  * (noms de champs historiques : rule_id, created_at, created_by_username…).
  */
 
-export type RuleType = 'multiple_choice' | 'free_text' | 'qcm';
+export type RuleType = 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation';
 
 export interface RuleConfig {
-	generator?: 'verb_groups' | 'llm_qcm' | 'conj_present';
+	generator?: 'verb_groups' | 'llm_qcm' | 'conj_present' | 'llm_span' | 'llm_punctuation';
 	check?: string;
 	highlight?: boolean;
 	balance?: boolean;
@@ -38,6 +38,16 @@ export interface BlankRow {
 	person?: string;
 	subject?: string;
 	category?: string;
+	/** span : mots cliquables de la phrase et indices attendus (« 0,1,2 »). */
+	tokens?: string[];
+	answer?: string;
+	kind?: string;
+}
+
+/** Données propres à un type d'exercice (ponctuation : mots affichés). */
+export interface ExerciseExtra {
+	words?: string[];
+	proper_nouns?: string[];
 }
 
 export interface RuleInfo {
@@ -64,6 +74,7 @@ export interface ExerciseRow {
 	verified_at: string | null;
 	verified_by_username: string | null;
 	rule: RuleInfo | null;
+	extra: ExerciseExtra | null;
 }
 
 export function mapExercise(r: RecordModel): ExerciseRow {
@@ -91,7 +102,8 @@ export function mapExercise(r: RecordModel): ExerciseRow {
 					groups: Array.isArray(rule.groups) ? rule.groups : null,
 					config: rule.config && typeof rule.config === 'object' ? rule.config : {}
 				}
-			: null
+			: null,
+		extra: r.extra && typeof r.extra === 'object' ? (r.extra as ExerciseExtra) : null
 	};
 }
 

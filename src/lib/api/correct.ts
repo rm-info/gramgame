@@ -15,6 +15,10 @@ export interface PerBlank {
 	variant?: boolean;
 	/** QCM : explication de la bonne réponse. */
 	explanation?: string;
+	/** span : indices des mots choisis (« 0,1,2 »). */
+	given_indices?: string;
+	/** ponctuation : signe ajouté là où il n'en fallait pas. */
+	extra?: boolean;
 }
 
 export interface CorrectionResult {

@@ -394,7 +394,9 @@ function validateQcm(out, rule, numItems) {
 		const absent = rule.candidates.filter((x) => !counts[x]);
 		if (absent.length) return fail(`Aucune question pour : ${absent.join(', ')}.`);
 	}
-	return { blanks };
+	// Le LLM rend souvent les questions groupées par réponse (toutes les
+	// « passé proche », puis toutes les « futur proche »…) : on mélange.
+	return { blanks: shuffle(blanks).map((b, i) => Object.assign(b, { position: i + 1 })) };
 }
 
 function qcmConsigne(rule) {
@@ -808,6 +810,7 @@ function grade(ruleType, exercise, responses) {
 module.exports = {
 	generate,
 	grade,
+	shuffle,
 	// exportés pour les tests
 	classifyProche,
 	checkPronoun,

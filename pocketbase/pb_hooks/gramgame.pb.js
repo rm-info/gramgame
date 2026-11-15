@@ -225,6 +225,22 @@ routerAdd(
 
 		let theme = String(body.theme || '').trim();
 		let llmModel = cfg.model;
+		let extra = null;
+
+		if (rule.rule_type === 'span' || rule.rule_type === 'punctuation') {
+			// GNS à cliquer, ponctuation : lib/span_punct.js (retries inclus).
+			const sp = require(`${__hooks}/lib/span_punct.js`);
+			try {
+				const out = sp.generate(cfg, rule, body, e.app.logger());
+				blanks = out.blanks;
+				exerciseText = out.text;
+				extra = out.extra || null;
+			} catch (err) {
+				lastError = String((err && err.message) || err);
+				if (err && err.providerStatus !== undefined) providerStatus = err.providerStatus;
+				else if (!err || !err.invalid) e.app.logger().error('Génération : erreur inattendue', 'error', lastError);
+			}
+		}
 
 		if (rule.rule_type === 'qcm' || rule.rule_type === 'free_text') {
 			// Nouveaux types : générateurs de lib/exercises.js (retries inclus).
@@ -296,10 +312,12 @@ routerAdd(
 		record.set('rule', rule.id);
 		record.set('theme', theme);
 		record.set('grade_level', body.grade_level);
-		record.set('num_blanks', body.num_blanks);
+		// Ponctuation : nombre de signes attendus (≠ nombre de phrases demandé).
+		record.set('num_blanks', blanks.length);
 		record.set('text', exerciseText);
 		record.set('blanks', blanks);
 		record.set('llm_model', llmModel);
+		if (extra) record.set('extra', extra);
 		record.set('verified', false);
 
 		try {
@@ -355,7 +373,8 @@ routerAdd(
 			id: exRecord.id,
 			rule: exRecord.getString('rule'),
 			grade_level: exRecord.getString('grade_level'),
-			blanks: g.jsonField(exRecord, 'blanks') || []
+			blanks: g.jsonField(exRecord, 'blanks') || [],
+			extra: g.jsonField(exRecord, 'extra')
 		};
 
 		let ruleRecord;
@@ -385,10 +404,16 @@ routerAdd(
 			if (typeof v === 'string' && v.length <= 100 && /^\d{1,3}$/.test(k)) responses[k] = v;
 		}
 
-		const grading =
-			rule.rule_type === 'qcm' || rule.rule_type === 'free_text'
-				? require(`${__hooks}/lib/exercises.js`).grade(rule.rule_type, exercise, responses)
-				: g.grade(exercise, responses, rule);
+		let grading;
+		if (rule.rule_type === 'qcm' || rule.rule_type === 'free_text') {
+			grading = require(`${__hooks}/lib/exercises.js`).grade(rule.rule_type, exercise, responses);
+		} else if (rule.rule_type === 'span') {
+			grading = require(`${__hooks}/lib/span_punct.js`).gradeSpan(exercise, responses);
+		} else if (rule.rule_type === 'punctuation') {
+			grading = require(`${__hooks}/lib/span_punct.js`).gradePunctuation(exercise, responses, exercise.extra);
+		} else {
+			grading = g.grade(exercise, responses, rule);
+		}
 		if (grading.score_total === 0) {
 			return e.json(400, { error: 'Aucune réponse fournie.' });
 		}
@@ -551,3 +576,43 @@ onRecordUpdateRequest((e) => {
 	e.record.set('groups', g.canonicalGroups(candidates, groups));
 	e.next();
 }, 'rules');
+
+// ────────────────────────────────────────────────────────────────────────────
+// Édition prof des exercices « GNS » et « ponctuation » : les mots cliquables,
+// les bonnes réponses et la liste des mots affichés sont recalculés côté
+// serveur à partir de ce que le prof a écrit (phrases marquées [[ ]], texte
+// ponctué).
+// ────────────────────────────────────────────────────────────────────────────
+onRecordUpdateRequest((e) => {
+	const g = require(`${__hooks}/lib/gram.js`);
+	let ruleType = '';
+	try {
+		ruleType = e.app.findRecordById('rules', e.record.getString('rule')).getString('rule_type');
+	} catch (_) {}
+
+	if (ruleType === 'span') {
+		const sp = require(`${__hooks}/lib/span_punct.js`);
+		const items = g.jsonField(e.record, 'blanks') || [];
+		const blanks = [];
+		for (let i = 0; i < items.length; i++) {
+			const it = items[i] || {};
+			const item = sp.buildSpanItem(it.prompt, it.kind, it.explanation, i + 1);
+			if (item.error) throw new BadRequestError(`Phrase ${i + 1} : ${item.error}.`);
+			blanks.push(item);
+		}
+		if (!blanks.length) throw new BadRequestError('Il faut au moins une phrase.');
+		e.record.set('blanks', blanks);
+		e.record.set('num_blanks', blanks.length);
+	} else if (ruleType === 'punctuation') {
+		const sp = require(`${__hooks}/lib/span_punct.js`);
+		const extra = g.jsonField(e.record, 'extra') || {};
+		const properNouns = Array.isArray(extra.proper_nouns) ? extra.proper_nouns.map(String) : [];
+		const p = sp.parsePunctuation(e.record.getString('text'), properNouns);
+		if (p.error) throw new BadRequestError(`Texte : ${p.error}.`);
+		e.record.set('text', e.record.getString('text').replace(/\s+/g, ' ').trim());
+		e.record.set('blanks', p.blanks);
+		e.record.set('num_blanks', p.blanks.length);
+		e.record.set('extra', { words: p.words, proper_nouns: properNouns });
+	}
+	e.next();
+}, 'exercises');

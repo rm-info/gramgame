@@ -5,19 +5,23 @@
 	import { normalizeWord, parseGroupsText, groupsToText, groupLabel } from '$lib/confusion';
 	import { activeUsername } from '$lib/active-username.svelte';
 
-	type RuleType = 'multiple_choice' | 'free_text' | 'qcm';
+	type RuleType = 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation';
 
 	const TYPE_LABELS: Record<RuleType, string> = {
 		multiple_choice: 'texte à trous + menu',
 		free_text: 'texte à trous au clavier',
-		qcm: 'QCM'
+		qcm: 'QCM',
+		span: 'mots à cliquer (GNS)',
+		punctuation: 'ponctuation à rétablir'
 	};
+	/** Types qui utilisent une liste de candidats / réponses possibles. */
+	const WITH_CANDIDATES: RuleType[] = ['multiple_choice', 'qcm'];
 	const CATEGORY_LABELS: Record<string, string> = {
 		orthographe: 'Orthographe',
 		grammaire: 'Grammaire',
 		conjugaison: 'Conjugaison'
 	};
-	const GENERATORS = ['verb_groups', 'llm_qcm', 'conj_present'];
+	const GENERATORS = ['verb_groups', 'llm_qcm', 'conj_present', 'llm_span', 'llm_punctuation'];
 
 	interface RuleExample {
 		sentence: string;
@@ -242,7 +246,7 @@
 		if (form.id.length < 2) return 'ID trop court.';
 		if (!form.display_name.trim()) return 'Nom d\'affichage requis.';
 		if (!form.short_description.trim()) return 'Description requise.';
-		if (form.rule_type !== 'free_text' && form.candidates.length < 2) {
+		if (WITH_CANDIDATES.includes(form.rule_type) && form.candidates.length < 2) {
 			return 'Il faut au moins 2 candidats (les réponses possibles).';
 		}
 		if (form.rule_type !== 'multiple_choice') {
@@ -281,7 +285,7 @@
 			rule_type: form.rule_type,
 			category: form.category || null,
 			config: form.rule_type === 'multiple_choice' ? null : parseConfig(form.configText),
-			candidates: form.rule_type === 'free_text' ? null : form.candidates,
+			candidates: WITH_CANDIDATES.includes(form.rule_type) ? form.candidates : null,
 			groups: (() => {
 				if (form.rule_type !== 'multiple_choice') return null;
 				const g = parseGroupsText(form.groupsText);
@@ -457,7 +461,7 @@
 							+ <code>hard_consigne</code> : le mode difficile ne surligne plus le passage) ·
 							<code>conj_present</code> : verbes et
 							personnes choisis par le serveur, réponses calculées (<code>pool</code> :
-							<code>present</code> | <code>eter_eler</code> | <code>accord</code>).
+							<code>present</code> | <code>eter_eler</code> | <code>accord</code>) · <code>llm_span</code> : phrases avec le GNS entre [[ ]] (type « mots à cliquer ») · <code>llm_punctuation</code> : texte à ponctuer (type « ponctuation »).
 						</span>
 					</label>
 				{/if}
@@ -467,7 +471,7 @@
 					<input type="text" bind:value={form.difficulty_hint} placeholder="CE2" />
 				</label>
 
-				{#if form.rule_type !== 'free_text'}
+				{#if WITH_CANDIDATES.includes(form.rule_type)}
 				<div class="full">
 					<span class="label-text">
 						{form.rule_type === 'qcm' ? 'Réponses possibles' : 'Candidats (les valeurs possibles)'}
@@ -510,7 +514,7 @@
 				</label>
 				{/if}
 
-				{#if form.rule_type !== 'free_text'}
+				{#if WITH_CANDIDATES.includes(form.rule_type)}
 				<div class="full">
 					<div class="row-between">
 						<span class="label-text">Exemples positifs (phrases où la règle s'applique)</span>
