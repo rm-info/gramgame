@@ -7,6 +7,10 @@
 //   POST /api/gram/login     { username }              → { otpId, email_hint }
 //   POST /api/gram/generate  { rule_id, theme, grade_level, num_blanks }  (auth)
 //   POST /api/gram/correct   { exercise_id, responses }                   (auth)
+//   POST /api/gram/links, /links/{id}/accept     liens élève ↔ parent/prof  (auth)
+//   POST /api/gram/classes/join { code }         l'élève rejoint une classe (auth)
+//   POST /api/gram/classes/{id}/code             nouveau code de classe     (auth)
+//   GET  /api/gram/suivi                         tableau de suivi           (auth)
 //
 // Le login final se fait côté client avec le SDK :
 //   pb.collection('users').authWithOTP(otpId, code)
@@ -788,6 +792,120 @@ routerAdd(
 );
 
 // ────────────────────────────────────────────────────────────────────────────
+// Classes (prof) : un code par classe, l'élève qui le saisit rejoint la classe
+// ────────────────────────────────────────────────────────────────────────────
+
+// Création : le prof et le code sont posés par le serveur.
+onRecordCreateRequest((e) => {
+	const cl = require(`${__hooks}/lib/classes.js`);
+	if (!e.auth || e.auth.collection().name !== 'users') throw new ForbiddenError('Connexion requise.');
+	const name = cl.cleanName(e.record.getString('name'));
+	if (!name) throw new BadRequestError('Donne un nom à la classe.');
+	const count = e.app.countRecords('classes', $dbx.hashExp({ teacher: e.auth.id }));
+	if (count >= cl.MAX_CLASSES_PER_TEACHER) {
+		throw new BadRequestError(`Tu as déjà ${cl.MAX_CLASSES_PER_TEACHER} classes : supprimes-en une d'abord.`);
+	}
+	e.record.set('name', name);
+	e.record.set('teacher', e.auth.id);
+	e.record.set('teacher_username', e.auth.getString('username'));
+	e.record.set('code', cl.generateCode(e.app));
+	e.next();
+}, 'classes');
+
+// Renommage : on recopie le nouveau nom chez les élèves (affichage côté élève).
+onRecordUpdateRequest((e) => {
+	const cl = require(`${__hooks}/lib/classes.js`);
+	const original = e.record.original();
+	const name = cl.cleanName(e.record.getString('name'));
+	if (!name) throw new BadRequestError('Donne un nom à la classe.');
+	e.record.set('name', name);
+	// Par sécurité (en plus de la règle d'API) : prof et code non modifiables ici.
+	e.record.set('teacher', original.getString('teacher'));
+	e.record.set('teacher_username', original.getString('teacher_username'));
+	e.record.set('code', original.getString('code'));
+	e.next();
+	if (name !== original.getString('name')) {
+		const members = e.app.findRecordsByFilter('class_members', 'class = {:c}', '', 0, 0, { c: e.record.id });
+		for (const m of members) {
+			m.set('class_name', name);
+			e.app.save(m);
+		}
+	}
+}, 'classes');
+
+// Nouveau code : l'ancien ne marche plus (les élèves déjà inscrits restent).
+routerAdd(
+	'POST',
+	'/api/gram/classes/{id}/code',
+	(e) => {
+		const cl = require(`${__hooks}/lib/classes.js`);
+		let klass;
+		try {
+			klass = e.app.findRecordById('classes', e.request.pathValue('id'));
+		} catch (_) {
+			return e.json(404, { error: 'Classe introuvable.' });
+		}
+		if (klass.getString('teacher') !== e.auth.id && e.auth.getString('role') !== 'admin') {
+			return e.json(403, { error: "Ce n'est pas ta classe." });
+		}
+		klass.set('code', cl.generateCode(e.app));
+		e.app.save(klass);
+		return e.json(200, { id: klass.id, code: klass.getString('code') });
+	},
+	$apis.requireAuth('users')
+);
+
+// Un élève saisit le code : il rejoint la classe tout de suite.
+routerAdd(
+	'POST',
+	'/api/gram/classes/join',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const cl = require(`${__hooks}/lib/classes.js`);
+		if (e.auth.getString('role') !== 'eleve') {
+			return e.json(403, { error: 'Seul un compte élève peut rejoindre une classe avec un code.' });
+		}
+		const code = cl.normalizeCode(g.readJsonBody(e).code);
+		if (!cl.isValidCode(code)) {
+			return e.json(400, { error: `Le code d'une classe fait ${cl.CODE_LENGTH} caractères (lettres et chiffres).` });
+		}
+		let klass;
+		try {
+			klass = e.app.findFirstRecordByFilter('classes', 'code = {:c}', { c: code });
+		} catch (_) {
+			return e.json(404, { error: 'Aucune classe avec ce code. Vérifie-le auprès de ton professeur.' });
+		}
+		let already = false;
+		try {
+			e.app.findFirstRecordByFilter('class_members', 'class = {:c} && student = {:s}', { c: klass.id, s: e.auth.id });
+			already = true;
+		} catch (_) {}
+		if (already) return e.json(409, { error: `Tu fais déjà partie de la classe « ${klass.getString('name')} ».` });
+
+		if (e.app.countRecords('class_members', $dbx.hashExp({ student: e.auth.id })) >= cl.MAX_CLASSES_PER_STUDENT) {
+			return e.json(400, { error: `Tu es déjà dans ${cl.MAX_CLASSES_PER_STUDENT} classes : quittes-en une d'abord.` });
+		}
+		if (e.app.countRecords('class_members', $dbx.hashExp({ class: klass.id })) >= cl.MAX_MEMBERS_PER_CLASS) {
+			return e.json(400, { error: 'Cette classe est complète. Préviens ton professeur.' });
+		}
+
+		const m = new Record(e.app.findCollectionByNameOrId('class_members'));
+		m.set('class', klass.id);
+		m.set('student', e.auth.id);
+		m.set('student_username', e.auth.getString('username'));
+		m.set('class_name', klass.getString('name'));
+		m.set('teacher_username', klass.getString('teacher_username'));
+		e.app.save(m);
+		return e.json(200, {
+			id: m.id,
+			class_name: klass.getString('name'),
+			teacher_username: klass.getString('teacher_username')
+		});
+	},
+	$apis.requireAuth('users')
+);
+
+// ────────────────────────────────────────────────────────────────────────────
 // Tableau de suivi (parents, profs ; admin : tous les élèves)
 // ────────────────────────────────────────────────────────────────────────────
 routerAdd(
@@ -800,6 +918,24 @@ routerAdd(
 			return e.json(403, { error: 'Réservé aux parents et aux professeurs.' });
 		}
 
+		// Classes du prof (ou de l'admin) et leurs élèves.
+		const classes = [];
+		const classesOf = {}; // id élève → [id classe]
+		if (role === 'prof' || role === 'admin') {
+			const own = e.app.findRecordsByFilter('classes', 'teacher = {:me}', 'name', 100, 0, { me: e.auth.id });
+			for (const c of own) {
+				const members = e.app.findRecordsByFilter('class_members', 'class = {:c}', 'student_username', 200, 0, {
+					c: c.id
+				});
+				for (const m of members) {
+					const sid = m.getString('student');
+					(classesOf[sid] = classesOf[sid] || []).push(c.id);
+				}
+				classes.push({ id: c.id, name: c.getString('name'), code: c.getString('code'), count: members.length });
+			}
+		}
+
+		const linked = {};
 		let students = [];
 		if (role === 'admin') {
 			students = e.app.findRecordsByFilter('users', "role = 'eleve'", 'username', 300, 0);
@@ -812,7 +948,8 @@ routerAdd(
 				0,
 				{ me: e.auth.id }
 			);
-			const ids = links.map((l) => l.getString('student'));
+			for (const l of links) linked[l.getString('student')] = true;
+			const ids = Object.keys(linked).concat(Object.keys(classesOf).filter((id) => !linked[id]));
 			students = ids.length ? e.app.findRecordsByIds('users', ids) : [];
 			students.sort((a, b) => a.getString('username').localeCompare(b.getString('username')));
 		}
@@ -821,11 +958,17 @@ routerAdd(
 		const out = students.map((st) => {
 			const stats = suivi.studentStats(suivi.loadAttempts(e.app, st.id), rules);
 			return Object.assign(
-				{ id: st.id, username: st.getString('username'), grade_level: st.getString('grade_level') },
+				{
+					id: st.id,
+					username: st.getString('username'),
+					grade_level: st.getString('grade_level'),
+					classes: classesOf[st.id] || [],
+					linked: role === 'admin' || !!linked[st.id]
+				},
 				stats
 			);
 		});
-		return e.json(200, { role, students: out });
+		return e.json(200, { role, classes, students: out });
 	},
 	$apis.requireAuth('users')
 );

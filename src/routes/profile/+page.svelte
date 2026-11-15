@@ -4,6 +4,7 @@
 	import { auth } from '$lib/auth.svelte';
 	import { pb, errorMessage, ROLE_LABELS } from '$lib/pb';
 	import LinksManager from '$lib/components/LinksManager.svelte';
+	import JoinClass from '$lib/components/JoinClass.svelte';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { GRADE_LEVELS, profileState } from '$lib/profile.svelte';
 
@@ -116,6 +117,24 @@
 			{/if}
 		</form>
 	</div>
+
+	{#if activeUsername.isStudent}
+		<div class="card stack">
+			<h2>Mes classes</h2>
+			<p class="muted">
+				Avec le code de classe donné par ton professeur, tu rejoins sa classe tout de suite : il voit alors tes
+				résultats.
+			</p>
+			<JoinClass />
+		</div>
+	{:else if activeUsername.role === 'prof'}
+		<div class="card stack">
+			<h2>Mes classes</h2>
+			<p class="muted">
+				Tes classes et leurs codes se gèrent dans le <a href={`${base}/suivi`}>tableau de suivi</a>.
+			</p>
+		</div>
+	{/if}
 
 	{#if !activeUsername.isAdmin}
 		<div class="card stack">

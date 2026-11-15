@@ -4,6 +4,7 @@
 	import { pb, errorMessage } from '$lib/pb';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import LinksManager from '$lib/components/LinksManager.svelte';
+	import ClassesManager from '$lib/components/ClassesManager.svelte';
 
 	interface Notion {
 		rule_id: string;
@@ -16,10 +17,18 @@
 		last_date: string;
 		status: 'acquis' | 'en_cours' | 'a_retravailler' | 'non_commence';
 	}
+	interface ClassInfo {
+		id: string;
+		name: string;
+		code: string;
+		count: number;
+	}
 	interface Student {
 		id: string;
 		username: string;
 		grade_level: string;
+		classes: string[];
+		linked: boolean;
 		attempts_total: number;
 		attempts_7d: number;
 		avg_7d: number | null;
@@ -38,6 +47,11 @@
 	};
 
 	let students = $state<Student[]>([]);
+	let classes = $state<ClassInfo[]>([]);
+	/** Filtre : '' = tous, 'linked' = liés individuellement, sinon id de classe. */
+	let filter = $state('');
+	const hasClasses = $derived(activeUsername.role === 'prof' || activeUsername.isAdmin);
+	let classesOpen = $state(false);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	// Volet « Gérer mes élèves » : ouvert d'office s'il n'y a encore personne.
@@ -58,15 +72,30 @@
 		if (!silent) loading = true;
 		loadError = null;
 		try {
-			const res = await pb.send<{ students: Student[] }>('/api/gram/suivi', { method: 'GET' });
+			const res = await pb.send<{ students: Student[]; classes: ClassInfo[] }>('/api/gram/suivi', { method: 'GET' });
 			students = res.students;
-			if (firstLoad && students.length === 0) linksOpen = true;
+			classes = res.classes ?? [];
+			if (filter && filter !== 'linked' && !classes.some((c) => c.id === filter)) filter = '';
+			if (firstLoad && students.length === 0) {
+				if (hasClasses) classesOpen = true;
+				else linksOpen = true;
+			}
 			firstLoad = false;
 		} catch (e) {
 			loadError = errorMessage(e);
 		}
 		loading = false;
 	}
+
+	const className = (id: string) => classes.find((c) => c.id === id)?.name ?? '';
+	const shown = $derived(
+		filter === ''
+			? students
+			: filter === 'linked'
+				? students.filter((s) => s.linked)
+				: students.filter((s) => s.classes.includes(filter))
+	);
+	const showLinkedFilter = $derived(!activeUsername.isAdmin && students.some((s) => s.linked));
 
 	const sortedNotions = (s: Student) =>
 		[...s.notions].sort((a, b) => STATUS[a.status].order - STATUS[b.status].order);
@@ -94,13 +123,25 @@
 		<p class="muted">
 			{activeUsername.isAdmin
 				? 'En tant qu\'administrateur, tu vois tous les élèves.'
-				: 'Les résultats des élèves liés à ton compte. Une notion est « acquise » quand la moyenne de ses 3 dernières tentatives atteint 80 % (au moins 2 tentatives).'}
+				: activeUsername.role === 'prof'
+					? 'Les résultats des élèves de tes classes et de ceux liés à ton compte. Une notion est « acquise » quand la moyenne de ses 3 dernières tentatives atteint 80 % (au moins 2 tentatives).'
+					: 'Les résultats des élèves liés à ton compte. Une notion est « acquise » quand la moyenne de ses 3 dernières tentatives atteint 80 % (au moins 2 tentatives).'}
 		</p>
 	</header>
 
+	{#if hasClasses}
+		<details class="card" bind:open={classesOpen}>
+			<summary><strong>Mes classes</strong> (créer, codes à donner aux élèves)</summary>
+			<div class="links-box"><ClassesManager onchange={() => load(true)} /></div>
+		</details>
+	{/if}
+
 	{#if !activeUsername.isAdmin}
 		<details class="card" bind:open={linksOpen}>
-			<summary><strong>Gérer mes élèves</strong> (ajouter, demandes en attente)</summary>
+			<summary>
+				<strong>{hasClasses ? 'Élèves suivis individuellement' : 'Gérer mes élèves'}</strong> (ajouter, demandes en
+				attente)
+			</summary>
 			<div class="links-box"><LinksManager onchange={() => load(true)} /></div>
 		</details>
 	{/if}
@@ -112,12 +153,35 @@
 	{:else if students.length === 0}
 		<p class="muted">Aucun élève à suivre pour l'instant.</p>
 	{:else}
-		{#each students as s (s.id)}
-			<details class="card student" open={students.length <= 3}>
+		{#if classes.length || showLinkedFilter}
+			<div class="filters" role="group" aria-label="Filtrer par classe">
+				<button type="button" class:active={filter === ''} onclick={() => (filter = '')}
+					>Tous ({students.length})</button
+				>
+				{#each classes as c (c.id)}
+					<button type="button" class:active={filter === c.id} onclick={() => (filter = c.id)}
+						>{c.name} ({c.count})</button
+					>
+				{/each}
+				{#if showLinkedFilter && classes.length}
+					<button type="button" class:active={filter === 'linked'} onclick={() => (filter = 'linked')}
+						>Suivis individuellement ({students.filter((s) => s.linked).length})</button
+					>
+				{/if}
+			</div>
+		{/if}
+		{#if shown.length === 0}
+			<p class="muted">Aucun élève dans cette classe pour l'instant.</p>
+		{/if}
+		{#each shown as s (s.id)}
+			<details class="card student" open={shown.length <= 3}>
 				<summary>
 					<span class="who">
 						<strong>{s.username}</strong>
 						{#if s.grade_level}<span class="muted">· {s.grade_level}</span>{/if}
+						{#if s.classes.length && filter === ''}
+							<span class="muted class-names">· {s.classes.map(className).join(', ')}</span>
+						{/if}
 					</span>
 					<span class="chips">
 						<span class="chip">dernière activité : {ago(s.last_activity)}</span>
@@ -179,6 +243,31 @@
 </section>
 
 <style>
+	.filters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+	.filters button {
+		width: auto;
+		padding: 4px 12px;
+		border-radius: 999px;
+		background: transparent;
+		color: var(--color-primary);
+		border: 1px solid var(--color-primary);
+		font-size: 0.9em;
+	}
+	.filters button:hover:not(.active) {
+		background: rgba(47, 93, 177, 0.08);
+		color: var(--color-primary);
+	}
+	.filters button.active {
+		background: var(--color-primary);
+		color: #fff;
+	}
+	.class-names {
+		font-size: 0.85em;
+	}
 	.links-box {
 		margin-top: var(--space-3, 12px);
 	}

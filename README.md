@@ -163,6 +163,12 @@ Un élève peut être lié à plusieurs parents et plusieurs profs (collection `
 
 `/suivi` (parents, profs, admin) : pour chaque élève lié, dernière activité, nombre d'exercices sur 7 jours, moyennes 7 et 30 jours, maîtrise par notion (**acquis** si la moyenne des 3 dernières tentatives atteint 80 % avec au moins 2 tentatives, **en cours** entre 50 et 80 %, **à retravailler** en dessous), points faibles sur 30 jours (catégories ratées plus d'une fois sur trois : confusion, groupe du verbe, signe de ponctuation…) et dernières tentatives. Les chiffres sont calculés par le serveur (`/api/gram/suivi`, `pb_hooks/lib/suivi.js`) pour les seuls élèves liés : l'adresse mail des familles n'est jamais exposée.
 
+### Classes
+
+Un prof (ou un admin) crée ses classes dans `/suivi` (« Mes classes »). Chaque classe a un **code de 6 caractères** généré par le serveur, sans caractères ambigus (pas de 0/O, 1/I/L), par ex. `K7XQ2M`. L'élève le saisit dans son profil (« Mes classes ») et rejoint la classe tout de suite, sans validation (casse, espaces et tirets ignorés). « Nouveau code » invalide l'ancien ; les élèves déjà inscrits restent. Le prof peut renommer, supprimer une classe ou en retirer un élève ; l'élève peut la quitter. Collections `classes` (le code n'est lisible que par le prof) et `class_members` (créée seulement via `POST /api/gram/classes/join`, limité à 10 essais/min par IP). Limites : 30 classes par prof, 60 élèves par classe, 10 classes par élève.
+
+Le tableau de suivi d'un prof réunit les élèves de ses classes et ceux liés individuellement (sans doublon), avec un filtre par classe.
+
 ## Ajouter une règle de grammaire
 
 Depuis l'app : **Gestion → Règles** (admin). Ou depuis l'admin PocketBase `/_/` → collection `rules`.
