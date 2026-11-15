@@ -107,7 +107,8 @@ const MISTAKES = {
 	negative: 'oubli de « ne » (Il mange pas.), oubli de « pas » (Il ne mange.), mauvaise place (Il ne pas mange. / Il n\'a mangé pas.), « n\' » oublié devant une voyelle (Il ne aime pas.)',
 	interrogative: 'point d\'interrogation oublié, trait d\'union oublié (Viens tu ?), -t- oublié (Mange il ?), inversion fautive (Est-ce que vient-il ?)',
 	exclamative: 'point d\'exclamation oublié, « quel » mal accordé (Quel belle journée !), phrase devenue interrogative',
-	imperative: 'sujet gardé (Tu range ta chambre !), s gardé sur un verbe en -er (Ranges ta chambre.), mauvaise personne'
+	imperative:
+		'sujet gardé (Tu range ta chambre !), s gardé sur un verbe en -er (Ranges ta chambre.), verbe mal conjugué (Es prudent. / Vas chercher), pronom mal placé (Te lave les mains.). JAMAIS un impératif correct à une autre personne (Allez à la plage ! pour « Nous allons à la plage. ») : c\'est aussi une phrase impérative juste'
 };
 
 function callTransform(cfg, rule, req, targets, attemptIdx) {
@@ -142,6 +143,7 @@ Pour chaque phrase, donne :
 RÈGLES :
 - Pour l'impérative, la phrase de départ a pour sujet « tu », « nous » ou « vous » (l'impératif n'existe qu'à ces personnes).
 - Garde le même sens et le même temps que la phrase de départ (sauf l'impératif).
+- Forme négative : après la négation, « du / de la / de l' / des / un / une » devant le complément deviennent « de / d' » (Les poules pondent des œufs. → Les poules ne pondent pas d'œufs.) ; « ne pondent pas des œufs » ou « ne mange pas de l'herbe » ne sont PAS des références correctes.
 - Pas deux fois la même phrase.${spread}${retryHint}
 
 Réponds UNIQUEMENT en appelant le tool submit_items.`;

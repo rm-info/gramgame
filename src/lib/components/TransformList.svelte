@@ -24,12 +24,21 @@
 	};
 
 	/** Ordre des propositions stable (même ordre après rechargement), sans dévoiler la bonne. */
+	// Graine = hash FNV-1a de la phrase, puis mélangeur 32 bits (Math.imul : pas
+	// de perte de précision). L'ancien LCG en flottants laissait la bonne réponse
+	// presque jamais en 1re place.
 	function shuffled(item: BlankRow): string[] {
 		const opts = [...(item.options ?? [])];
-		let seed = item.position * 7919 + (item.source ?? '').length * 104729;
+		let h = 2166136261;
+		for (const c of `${item.position}|${item.source ?? ''}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+		const rand = () => {
+			h = Math.imul(h ^ (h >>> 15), 2246822507);
+			h = Math.imul(h ^ (h >>> 13), 3266489909);
+			h ^= h >>> 16;
+			return (h >>> 0) / 4294967296;
+		};
 		for (let i = opts.length - 1; i > 0; i--) {
-			seed = (seed * 1103515245 + 12345) % 2147483648;
-			const j = seed % (i + 1);
+			const j = Math.floor(rand() * (i + 1));
 			[opts[i], opts[j]] = [opts[j], opts[i]];
 		}
 		return opts;
