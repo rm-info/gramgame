@@ -138,4 +138,14 @@ for (const g of Object.values(cj.POOLS)) for (const byDiff of Object.values(g)) 
   }
   ok(rep2 === 0, `présent CM2 : ${rep2} verbe(s) répété(s) sur 3 exercices`);
 }
+// Homophones : élision oubliée devant un trou qui commence par une voyelle.
+{
+  const gram = require('./load.cjs')('gram.js');
+  const rule = { candidates: ['a', 'à'], groups: null };
+  const v = gram.validateExercise({ text: "Personne ne {{1}} vu. Il pense {{2}} elle. Que {{3}} -t-il dit ? Il le {{4}} vu jusque {{5}} midi. Donne-le {{6}} Paul. Le {{7}} rien.",
+    blanks: [1, 2, 3, 4, 5, 6, 7].map((p) => ({ position: p, correct: [2, 5, 6].includes(p) ? 'à' : 'a' })) }, rule, 7);
+  ok(!v.error && v.text === "Personne n'{{1}} vu. Il pense {{2}} elle. Qu'{{3}} -t-il dit ? Il l'{{4}} vu jusqu'{{5}} midi. Donne-le {{6}} Paul. L'{{7}} rien.", 'élisions homophones : ' + (v.error || v.text));
+  const s = gram.validateExercise({ text: 'Ils ne {{1}} pas là.', blanks: [{ position: 1, correct: 'sont' }] }, { candidates: ['son', 'sont'], groups: null }, 1);
+  ok(s.text === 'Ils ne {{1}} pas là.', 'pas d’élision devant une consonne : ' + s.text);
+}
 console.log(fail ? `${fail} échec(s)` : 'tout OK'); if (fail) process.exit(1);

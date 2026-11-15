@@ -4,6 +4,7 @@
 	import { auth } from '$lib/auth.svelte';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { mapAttempt, type AttemptRow } from '$lib/data';
+	import { evalsApi, formatDateTime, type MyEval } from '$lib/api/evals';
 
 	let attempts = $state<AttemptRow[]>([]);
 	let loadingAttempts = $state(true);
@@ -29,6 +30,23 @@
 			.finally(() => {
 				loadingAttempts = false;
 			});
+	});
+
+	// Élève : évaluations à faire.
+	let evalsTodo = $state<MyEval[]>([]);
+	$effect(() => {
+		if (!auth.user || !activeUsername.isStudent) {
+			evalsTodo = [];
+			return;
+		}
+		evalsApi
+			.mine()
+			.then((r) => {
+				evalsTodo = r.evaluations.filter(
+					(m) => m.state === 'open' && (m.status === 'todo' || m.status === 'in_progress')
+				);
+			})
+			.catch(() => (evalsTodo = []));
 	});
 
 	function formatDate(iso: string) {
@@ -59,6 +77,21 @@
 		thème, et l'IA te concocte un exercice sur mesure.
 	</p>
 
+	{#if evalsTodo.length}
+		<div class="card stack evals-card">
+			<h2>📝 {evalsTodo.length === 1 ? 'Une évaluation à faire' : `${evalsTodo.length} évaluations à faire`}</h2>
+			<ul>
+				{#each evalsTodo as m (m.id)}
+					<li>
+						<strong>{m.title}</strong>
+						<span class="muted">par {m.author_username}{m.closes_at ? ` · avant le ${formatDateTime(m.closes_at)}` : ''}</span>
+					</li>
+				{/each}
+			</ul>
+			<a href={`${base}/evaluations`}><button type="button">Voir mes évaluations</button></a>
+		</div>
+	{/if}
+
 	{#if activeUsername.isSupervisor}
 		<div class="card stack suivi-card">
 			<h2>{activeUsername.role === 'parent' ? 'Le suivi de tes enfants' : 'Le suivi de tes élèves'}</h2>
@@ -66,6 +99,15 @@
 				Leurs exercices, leurs moyennes, les notions acquises et celles à retravailler.
 			</p>
 			<a href={`${base}/suivi`}><button type="button">Ouvrir le tableau de suivi</button></a>
+		</div>
+		<div class="card stack">
+			<h2>Évaluations</h2>
+			<p class="muted">
+				Prépare un contrôle (une ou plusieurs notions), relis-le et donne-le {activeUsername.role === 'parent'
+					? 'à tes enfants'
+					: 'à tes classes'}. Une seule tentative, correction quand tu le décides.
+			</p>
+			<a href={`${base}/evaluations`}><button type="button">Mes évaluations</button></a>
 		</div>
 	{/if}
 
@@ -110,6 +152,16 @@
 </section>
 
 <style>
+	.evals-card {
+		border-color: var(--color-primary);
+	}
+	.evals-card ul {
+		margin: 0;
+		padding-left: 1.2em;
+	}
+	.evals-card li span {
+		margin-left: 6px;
+	}
 	.suivi-card {
 		border-left: 4px solid var(--color-primary);
 	}

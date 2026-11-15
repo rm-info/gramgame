@@ -159,7 +159,7 @@
 								<strong>{u.username}</strong>
 								{#if isSelf}<span class="muted self-tag">(toi)</span>{/if}
 							</td>
-							<td data-label="Email" class="muted">{u.real_email}</td>
+							<td data-label="Email" class="muted email">{u.real_email}</td>
 							<td data-label="Rôle">
 								{#if isSelf}
 									<span class="role-readonly">{ROLE_LABELS[u.role] ?? u.role}</span>
@@ -222,8 +222,16 @@
 		text-align: left;
 		padding: var(--space-3) var(--space-2);
 		border-bottom: 1px solid var(--color-border);
-		/* Les adresses mail longues passent à la ligne au lieu d'élargir le tableau. */
+	}
+	/* Seules les adresses mail longues passent à la ligne (n'importe où) ;
+	   les autres mots ne sont jamais coupés. */
+	.users-table td.email {
 		overflow-wrap: anywhere;
+	}
+	.users-table th,
+	.role-readonly,
+	.users-table select {
+		white-space: nowrap;
 	}
 	.users-table th {
 		font-size: 0.85em;

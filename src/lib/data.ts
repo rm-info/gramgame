@@ -82,6 +82,9 @@ export interface ExerciseRow {
 	verified_by_username: string | null;
 	rule: RuleInfo | null;
 	extra: ExerciseExtra | null;
+	owner: string;
+	/** Exercice d'une évaluation (sinon null). */
+	evaluation: string | null;
 }
 
 export function mapExercise(r: RecordModel): ExerciseRow {
@@ -110,7 +113,9 @@ export function mapExercise(r: RecordModel): ExerciseRow {
 					config: rule.config && typeof rule.config === 'object' ? rule.config : {}
 				}
 			: null,
-		extra: r.extra && typeof r.extra === 'object' ? (r.extra as ExerciseExtra) : null
+		extra: r.extra && typeof r.extra === 'object' ? (r.extra as ExerciseExtra) : null,
+		owner: r.owner ?? '',
+		evaluation: r.evaluation || null
 	};
 }
 

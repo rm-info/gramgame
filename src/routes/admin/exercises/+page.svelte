@@ -31,6 +31,8 @@
 		loadError = null;
 		pb.collection('exercises')
 			.getList(1, 200, {
+				// Les exercices d'évaluation restent dans leur évaluation.
+				filter: "evaluation = ''",
 				sort: '-created',
 				expand: 'rule',
 				fields:

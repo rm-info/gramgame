@@ -40,11 +40,18 @@
 		verified_at: string | null;
 		verified_by_username: string | null;
 		extra: ExerciseRow['extra'];
+		owner: string;
+		evaluation: string | null;
 	}
 
 	let exerciseId = $derived(page.params.id);
 
 	let exercise = $state<ExerciseData | null>(null);
+	// Exercice d'évaluation : son auteur (même parent) peut le corriger avant de la donner.
+	const canEdit = $derived(
+		activeUsername.canEditExercises ||
+			(!!exercise?.evaluation && exercise.owner === pb.authStore.record?.id)
+	);
 	let rule = $state<RuleInfo | null>(null);
 	const ruleType = $derived(rule?.rule_type ?? 'multiple_choice');
 	let loading = $state(true);
@@ -333,13 +340,17 @@
 		</div>
 	{:else if exercise && rule}
 		<header class="stack">
-			<a href={`${base}/exercise/${exercise.id}`} class="back">← Retour à l'exercice</a>
+			{#if exercise.evaluation}
+				<a href={`${base}/evaluations/${exercise.evaluation}`} class="back">← Retour à l'évaluation</a>
+			{:else}
+				<a href={`${base}/exercise/${exercise.id}`} class="back">← Retour à l'exercice</a>
+			{/if}
 			<h1>Édition d'un exercice</h1>
 			<p class="muted">
 				<strong>{rule.display_name}</strong> · Thème : <em>{exercise.theme}</em> · Niveau :
 				{exercise.grade_level}
 			</p>
-			{#if !activeUsername.canEditExercises}
+			{#if !canEdit}
 				<p class="error">Tu n'as pas les droits pour éditer cet exercice.</p>
 			{/if}
 		</header>
@@ -615,6 +626,7 @@
 			{/if}
 		</div>
 
+		{#if !exercise.evaluation}
 		<div class="card stack">
 			<label class="verify-row">
 				<input type="checkbox" bind:checked={editVerified} />
@@ -632,12 +644,13 @@
 				À cocher uniquement si le texte et les bonnes réponses sont conformes après relecture.
 			</p>
 		</div>
+		{/if}
 
 		<div class="actions">
 			<button
 				type="button"
 				onclick={handleSave}
-				disabled={saving || !validation.ok || !activeUsername.canEditExercises}
+				disabled={saving || !validation.ok || !canEdit}
 			>
 				{saving ? 'Enregistrement…' : 'Enregistrer'}
 			</button>

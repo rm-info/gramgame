@@ -169,6 +169,22 @@ Un prof (ou un admin) crée ses classes dans `/suivi` (« Mes classes »). Chaqu
 
 Le tableau de suivi d'un prof réunit les élèves de ses classes et ceux liés individuellement (sans doublon), avec un filtre par classe.
 
+### Évaluations
+
+Un prof ou un parent prépare une évaluation dans `/evaluations` :
+1. **Sujet** : jusqu'à 6 parties (une notion chacune, avec thème, nombre de questions, barème en points et, si la notion le permet, mode difficile imposé). Chaque partie est générée **une fois pour tous les élèves**. L'auteur la relit et peut la corriger dans l'éditeur d'exercice (y compris un parent, pour ses propres évaluations), la regénérer ou la retirer.
+2. **Élèves** : des classes (prof) et/ou des élèves liés.
+3. **Réglages** : date d'ouverture, date de fin, durée (0 = sans limite), et moment où l'élève voit sa note et la correction : dès qu'il rend sa copie, à la date de fin, ou quand l'auteur clique sur « Donner la correction ».
+4. **Publier**.
+
+Côté élève (« Évaluations », et un rappel sur l'accueil) : **une seule tentative**. Le chrono part à « Commencer » et continue si la page est fermée. Les réponses sont enregistrées sur le serveur au fur et à mesure. À la fin du temps ou à la date de fin, la copie est rendue avec ce qui a été répondu (au plus tard par la tâche planifiée toutes les 5 minutes). Les questions sans réponse comptent fausses.
+
+**Les réponses ne quittent jamais le serveur pendant l'épreuve.** L'élève ne lit pas les collections `evaluations`, `eval_submissions` ni les exercices d'une évaluation. Il passe par `/api/gram/evals/...`, qui envoie un sujet sans réponses, sans explications et sans surlignage en mode difficile. L'ordre des questions indépendantes et des propositions est mélangé pour chaque élève. La correction est faite par le serveur, avec les mêmes correcteurs que l'entraînement. Limite : à la maison, rien n'empêche d'ouvrir son cahier. La durée et la tentative unique limitent seulement la triche.
+
+Résultats pour l'auteur : copies rendues, moyenne, note /20 et points par partie pour chaque élève, copie corrigée détaillée, questions les plus ratées. « Refaire » efface la copie d'un élève pour qu'il recommence. Une fois qu'un élève a commencé, le sujet et le barème sont figés. On peut encore changer les dates, les élèves et le mode de correction. Les notes apparaissent aussi dans le suivi, à part de l'entraînement.
+
+Fichiers : `pb_migrations/1795300000_evaluations.js`, `pb_hooks/lib/evals.js` (sujet sans réponses, délais, notes), `lib/generation.js` et `lib/grading.js` (génération et correction partagées avec l'entraînement), `src/routes/evaluations/`.
+
 ## Ajouter une règle de grammaire
 
 Depuis l'app : **Gestion → Règles** (admin). Ou depuis l'admin PocketBase `/_/` → collection `rules`.
