@@ -11,6 +11,7 @@ export interface OtpRequestResponse {
 export function registerWithUsername(input: {
 	username: string;
 	email: string;
+	role?: 'eleve' | 'parent';
 }): Promise<OtpRequestResponse> {
 	return callGram<OtpRequestResponse>('register', input);
 }

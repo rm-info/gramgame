@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
-	import { pb, errorMessage, type UserRecord } from '$lib/pb';
+	import { pb, errorMessage, ROLE_LABELS, type UserRecord } from '$lib/pb';
 	import { activeUsername, type Role } from '$lib/active-username.svelte';
 
 	interface UserRow {
@@ -32,7 +32,7 @@
 	let updating = $state<Record<string, boolean>>({});
 	let updateMsg = $state<string | null>(null);
 
-	const ROLES: Role[] = ['user', 'prof', 'admin'];
+	const ROLES: Role[] = ['eleve', 'parent', 'prof', 'admin'];
 
 	// Garde admin-only : la /admin/+layout autorise prof+admin pour le dashboard,
 	// mais cette page-ci est strictement admin.
@@ -109,7 +109,7 @@
 		}
 		const u = users.find((x) => x.username === username);
 		if (u) u.role = newRole;
-		updateMsg = `Rôle de ${username} mis à jour : ${newRole}.`;
+		updateMsg = `Rôle de ${username} mis à jour : ${ROLE_LABELS[newRole]}.`;
 	}
 
 	function formatDate(iso: string) {
@@ -162,7 +162,7 @@
 							<td data-label="Email" class="muted">{u.real_email}</td>
 							<td data-label="Rôle">
 								{#if isSelf}
-									<span class="role-readonly">{u.role}</span>
+									<span class="role-readonly">{ROLE_LABELS[u.role] ?? u.role}</span>
 								{:else}
 									<select
 										value={u.role}
@@ -171,7 +171,7 @@
 											changeRole(u.username, (e.currentTarget as HTMLSelectElement).value as Role)}
 									>
 										{#each ROLES as r (r)}
-											<option value={r}>{r}</option>
+											<option value={r}>{ROLE_LABELS[r]}</option>
 										{/each}
 									</select>
 								{/if}

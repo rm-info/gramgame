@@ -138,7 +138,10 @@ routerAdd('POST', '/api/gram/register', (e) => {
 	user.set('email', g.syntheticEmail(username));
 	user.set('emailVisibility', false);
 	user.set('verified', false);
-	user.set('role', isFirst ? 'admin' : 'user');
+	// Rôle choisi à l'inscription : élève (défaut) ou parent. Le rôle prof
+	// est attribué par un admin (un prof peut modifier tous les exercices).
+	const wanted = body.role === 'parent' ? 'parent' : 'eleve';
+	user.set('role', isFirst ? 'admin' : wanted);
 	user.setRandomPassword();
 
 	try {
@@ -566,7 +569,7 @@ cronAdd('gram_purge_unverified', '17 4 * * *', () => {
 	const limit = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().replace('T', ' ');
 	const stale = $app.findRecordsByFilter(
 		'users',
-		"verified = false && role != 'admin' && created < {:limit}",
+		"verified = false && role != 'admin' && role != 'prof' && created < {:limit}",
 		'',
 		0,
 		0,
@@ -678,3 +681,139 @@ onRecordUpdateRequest((e) => {
 	}
 	e.next();
 }, 'exercises');
+
+// ────────────────────────────────────────────────────────────────────────────
+// Liens élève ↔ parent / prof
+// ────────────────────────────────────────────────────────────────────────────
+
+// Demande de lien par nom d'utilisateur, depuis l'un ou l'autre côté.
+routerAdd(
+	'POST',
+	'/api/gram/links',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const body = g.readJsonBody(e);
+		const me = e.auth;
+		const myRole = me.getString('role');
+		const username = String(body.username || '').trim().toLowerCase();
+		if (!g.USERNAME_RE.test(username)) return e.json(400, { error: "Nom d'utilisateur invalide." });
+		const other = g.findUserByUsername(e.app, username);
+		if (!other) return e.json(404, { error: "Aucun compte avec ce nom d'utilisateur." });
+		if (other.id === me.id) return e.json(400, { error: 'Tu ne peux pas te lier à toi-même.' });
+		const otherRole = other.getString('role');
+
+		let student;
+		let supervisor;
+		if (myRole === 'parent' || myRole === 'prof') {
+			if (otherRole !== 'eleve') return e.json(400, { error: `« ${username} » n'est pas un compte élève.` });
+			student = other;
+			supervisor = me;
+		} else if (myRole === 'eleve') {
+			if (otherRole !== 'parent' && otherRole !== 'prof') {
+				return e.json(400, { error: `« ${username} » n'est pas un compte parent ou professeur.` });
+			}
+			student = me;
+			supervisor = other;
+		} else {
+			return e.json(400, { error: 'Un administrateur voit déjà tous les élèves : pas besoin de lien.' });
+		}
+		const kind = supervisor.getString('role');
+
+		let existing = null;
+		try {
+			existing = e.app.findFirstRecordByFilter('links', 'student = {:s} && supervisor = {:v}', { s: student.id, v: supervisor.id });
+		} catch (_) {}
+		if (existing) {
+			// Les deux côtés ont demandé : on accepte.
+			if (existing.getString('status') === 'pending' && existing.getString('initiated_by') !== me.id) {
+				existing.set('status', 'accepted');
+				e.app.save(existing);
+				return e.json(200, { id: existing.id, status: 'accepted' });
+			}
+			return e.json(409, {
+				error: existing.getString('status') === 'accepted' ? 'Vous êtes déjà liés.' : 'Une demande est déjà en attente.'
+			});
+		}
+
+		// Parent et enfant avec la même adresse mail : même famille, lien direct.
+		const sameFamily =
+			kind === 'parent' &&
+			student.getString('real_email').toLowerCase() === supervisor.getString('real_email').toLowerCase();
+
+		const link = new Record(e.app.findCollectionByNameOrId('links'));
+		link.set('student', student.id);
+		link.set('supervisor', supervisor.id);
+		link.set('kind', kind);
+		link.set('status', sameFamily ? 'accepted' : 'pending');
+		link.set('initiated_by', me.id);
+		link.set('student_username', student.getString('username'));
+		link.set('supervisor_username', supervisor.getString('username'));
+		e.app.save(link);
+		return e.json(200, { id: link.id, status: link.getString('status') });
+	},
+	$apis.requireAuth('users')
+);
+
+// Acceptation d'une demande par la partie qui ne l'a pas faite.
+routerAdd(
+	'POST',
+	'/api/gram/links/{id}/accept',
+	(e) => {
+		let link;
+		try {
+			link = e.app.findRecordById('links', e.request.pathValue('id'));
+		} catch (_) {
+			return e.json(404, { error: 'Demande introuvable.' });
+		}
+		const me = e.auth.id;
+		const party = link.getString('student') === me || link.getString('supervisor') === me;
+		if (!party || link.getString('initiated_by') === me) return e.json(403, { error: 'Tu ne peux pas accepter cette demande.' });
+		link.set('status', 'accepted');
+		e.app.save(link);
+		return e.json(200, { id: link.id, status: 'accepted' });
+	},
+	$apis.requireAuth('users')
+);
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tableau de suivi (parents, profs ; admin : tous les élèves)
+// ────────────────────────────────────────────────────────────────────────────
+routerAdd(
+	'GET',
+	'/api/gram/suivi',
+	(e) => {
+		const suivi = require(`${__hooks}/lib/suivi.js`);
+		const role = e.auth.getString('role');
+		if (role !== 'parent' && role !== 'prof' && role !== 'admin') {
+			return e.json(403, { error: 'Réservé aux parents et aux professeurs.' });
+		}
+
+		let students = [];
+		if (role === 'admin') {
+			students = e.app.findRecordsByFilter('users', "role = 'eleve'", 'username', 300, 0);
+		} else {
+			const links = e.app.findRecordsByFilter(
+				'links',
+				"supervisor = {:me} && status = 'accepted'",
+				'student_username',
+				300,
+				0,
+				{ me: e.auth.id }
+			);
+			const ids = links.map((l) => l.getString('student'));
+			students = ids.length ? e.app.findRecordsByIds('users', ids) : [];
+			students.sort((a, b) => a.getString('username').localeCompare(b.getString('username')));
+		}
+
+		const rules = suivi.loadRules(e.app);
+		const out = students.map((st) => {
+			const stats = suivi.studentStats(suivi.loadAttempts(e.app, st.id), rules);
+			return Object.assign(
+				{ id: st.id, username: st.getString('username'), grade_level: st.getString('grade_level') },
+				stats
+			);
+		});
+		return e.json(200, { role, students: out });
+	},
+	$apis.requireAuth('users')
+);

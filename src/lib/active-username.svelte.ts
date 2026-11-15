@@ -17,13 +17,20 @@ class ActiveUsername {
 		return [...names].sort();
 	}
 	get role(): Role {
-		return auth.user?.role ?? 'user';
+		return auth.user?.role ?? 'eleve';
 	}
 	get isAdmin() {
 		return this.role === 'admin';
 	}
 	get canEditExercises() {
 		return this.role === 'prof' || this.role === 'admin';
+	}
+	/** Parent, prof ou admin : accès au tableau de suivi des élèves. */
+	get isSupervisor() {
+		return this.role === 'parent' || this.role === 'prof' || this.role === 'admin';
+	}
+	get isStudent() {
+		return this.role === 'eleve';
 	}
 	get loaded() {
 		return !auth.loading;

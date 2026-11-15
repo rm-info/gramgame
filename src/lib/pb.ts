@@ -15,7 +15,14 @@ export const pb = new PocketBase('/', new LocalAuthStore('gramgame.auth'));
 // l'annulation automatique des requêtes dupliquées du SDK.
 pb.autoCancellation(false);
 
-export type Role = 'user' | 'prof' | 'admin';
+export type Role = 'eleve' | 'parent' | 'prof' | 'admin';
+
+export const ROLE_LABELS: Record<Role, string> = {
+	eleve: 'élève',
+	parent: 'parent',
+	prof: 'professeur',
+	admin: 'administrateur'
+};
 
 export interface UserRecord extends RecordModel {
 	username: string;
