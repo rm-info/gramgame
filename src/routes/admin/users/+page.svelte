@@ -220,8 +220,10 @@
 	.users-table th,
 	.users-table td {
 		text-align: left;
-		padding: var(--space-3);
+		padding: var(--space-3) var(--space-2);
 		border-bottom: 1px solid var(--color-border);
+		/* Les adresses mail longues passent à la ligne au lieu d'élargir le tableau. */
+		overflow-wrap: anywhere;
 	}
 	.users-table th {
 		font-size: 0.85em;
