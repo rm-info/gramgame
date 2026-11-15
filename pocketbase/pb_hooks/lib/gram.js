@@ -303,7 +303,28 @@ function validateExercise(ex, rule, numBlanks) {
 		if (absent.length) return fail(`Confusion(s) sans aucun trou : ${absent.join(', ')}.`);
 	}
 	blanks.sort((x, y) => x.position - y.position);
-	return { blanks };
+	return { blanks, text: repairElisions(ex.text, blanks) };
+}
+
+// Mots qui s'élident devant une voyelle : « ne a » → « n'a », « que on » → « qu'on »,
+// « jusque à » → « jusqu'à », « de où » → « d'où », « il le a dit » → « il l'a dit ».
+const ELIDABLE = 'ne|que|jusque|lorsque|puisque|quoique|de|je|me|te|se|le|la|ce';
+const ELISION_RE = new RegExp(`(^|[\\s«"(])(${ELIDABLE})\\s+\\{\\{(\\d+)\\}\\}`, 'gi');
+const STARTS_WITH_VOWEL = /^[aàâäeéèêëiîïoôöuùûüy]/i;
+
+/**
+ * Élision oubliée devant un trou dont la réponse commence par une voyelle
+ * (« Personne ne {{14}} remarqué » pour « a ») : on répare le texte
+ * (« n'{{14}} ») plutôt que de regénérer. Les mots d'une même confusion
+ * commencent tous par une voyelle (a/à, on/ont, et/est, ou/où) : l'apostrophe
+ * ne trahit pas la réponse.
+ */
+function repairElisions(text, blanks) {
+	const correctOf = {};
+	for (const b of blanks) correctOf[b.position] = b.correct;
+	return String(text).replace(ELISION_RE, (m, pre, word, pos) =>
+		STARTS_WITH_VOWEL.test(correctOf[Number(pos)] || '') ? `${pre}${word.slice(0, -1)}'{{${pos}}}` : m
+	);
 }
 
 function formatExamples(rule) {
@@ -551,6 +572,7 @@ module.exports = {
 	llmConfig,
 	validateGenerateRequest,
 	validateExercise,
+	repairElisions,
 	chatCompletion,
 	parseToolCall,
 	normalizeWord,

@@ -112,7 +112,7 @@ function generateExercise(app, auth, body, opts) {
 			const v = g.validateExercise(candidate, rule, body.num_blanks);
 			if (!v.error) {
 				blanks = v.blanks;
-				exerciseText = candidate.text;
+				exerciseText = v.text;
 				break;
 			}
 			lastError = v.error;
