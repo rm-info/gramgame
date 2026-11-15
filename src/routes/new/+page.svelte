@@ -106,7 +106,7 @@
 		pastLoading = true;
 		pb.collection('exercises')
 			.getList(1, 20, {
-				filter: pb.filter('owner = {:id}', { id: userId }),
+				filter: pb.filter("owner = {:id} && evaluation = ''", { id: userId }),
 				sort: '-created',
 				expand: 'rule',
 				fields:

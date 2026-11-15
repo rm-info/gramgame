@@ -98,6 +98,7 @@
 				{:else}
 					<a href={`${base}/profile`} class="profile-link">{activeUsername.username}</a>
 				{/if}
+				<a href={`${base}/evaluations`} class="admin-link">Évaluations</a>
 				{#if activeUsername.isSupervisor}
 					<a href={`${base}/suivi`} class="admin-link">Suivi</a>
 				{/if}

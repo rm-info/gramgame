@@ -195,176 +195,13 @@ routerAdd(
 	(e) => {
 		const g = require(`${__hooks}/lib/gram.js`);
 		const body = g.readJsonBody(e);
-
-		let ruleRecord;
-		try {
-			ruleRecord = e.app.findRecordById('rules', String((body && body.rule_id) || ''));
-		} catch (_) {
-			return e.json(404, { error: `Règle introuvable : ${body && body.rule_id}` });
-		}
-		const rule = {
-			id: ruleRecord.id,
-			display_name: ruleRecord.getString('display_name'),
-			short_description: ruleRecord.getString('short_description'),
-			rule_type: ruleRecord.getString('rule_type'),
-			candidates: g.jsonField(ruleRecord, 'candidates') || [],
-			groups: g.jsonField(ruleRecord, 'groups'),
-			examples: g.jsonField(ruleRecord, 'examples'),
-			config: g.jsonField(ruleRecord, 'config') || {}
-		};
-		// Liste de verbes tirée au sort : ni thème ni LLM.
-		const noLlm = rule.config.generator === 'verb_groups';
-
-		const reqError = g.validateGenerateRequest(body, { needTheme: !noLlm });
-		if (reqError) return e.json(400, { error: reqError });
-
-		const cfg = g.llmConfig();
-		if (!cfg.apiKey && !noLlm) {
-			e.app.logger().error('LLM_API_KEY non configurée.');
-			return e.json(500, { error: 'Configuration serveur incomplète (clé LLM manquante).' });
-		}
-
-		const MAX_ATTEMPTS = 3; // 1 essai + 2 retries
-		let blanks = null;
-		let exerciseText = '';
-		let lastError = '';
-		let providerStatus = null;
-
-		let theme = String(body.theme || '').trim();
-		let llmModel = cfg.model;
-		let extra = null;
-
-		if (rule.rule_type === 'transform') {
-			// Transformations de phrases : lib/transform.js (retries inclus).
-			const tf = require(`${__hooks}/lib/transform.js`);
-			try {
-				const out = tf.generate(cfg, rule, body, e.app.logger());
-				blanks = out.blanks;
-				exerciseText = out.text;
-			} catch (err) {
-				lastError = String((err && err.message) || err);
-				if (err && err.providerStatus !== undefined) providerStatus = err.providerStatus;
-				else if (!err || !err.invalid) e.app.logger().error('Génération : erreur inattendue', 'error', lastError);
-			}
-		}
-
-		if (rule.rule_type === 'span' || rule.rule_type === 'punctuation') {
-			// GNS à cliquer, ponctuation : lib/span_punct.js (retries inclus).
-			const sp = require(`${__hooks}/lib/span_punct.js`);
-			try {
-				const out = sp.generate(cfg, rule, body, e.app.logger());
-				blanks = out.blanks;
-				exerciseText = out.text;
-				extra = out.extra || null;
-			} catch (err) {
-				lastError = String((err && err.message) || err);
-				if (err && err.providerStatus !== undefined) providerStatus = err.providerStatus;
-				else if (!err || !err.invalid) e.app.logger().error('Génération : erreur inattendue', 'error', lastError);
-			}
-		}
-
-		if (rule.rule_type === 'qcm' || rule.rule_type === 'free_text') {
-			// Nouveaux types : générateurs de lib/exercises.js (retries inclus).
-			const ex = require(`${__hooks}/lib/exercises.js`);
-			try {
-				// Verbes des derniers exercices de l'élève : tirés en dernier pour varier.
-				let recentVerbs = [];
-				try {
-					const recs = e.app.findRecordsByFilter('exercises', 'owner = {:u}', '-created', 8, 0, { u: e.auth.id });
-					recentVerbs = recs.map((r) =>
-						(g.jsonField(r, 'blanks') || [])
-							.map((b) => (b && (b.verb || (typeof b.prompt === 'string' && !/\s/.test(b.prompt) ? b.prompt : ''))) || '')
-							.filter(Boolean)
-					);
-				} catch (err) {
-					e.app.logger().warn('Verbes récents introuvables', 'error', String(err));
-				}
-				const out = ex.generate(cfg, rule, body, e.app.logger(), { recentVerbs });
-				blanks = out.blanks;
-				exerciseText = out.text;
-				if (out.theme) theme = out.theme;
-				if (out.llm_model) llmModel = out.llm_model;
-			} catch (err) {
-				lastError = String((err && err.message) || err);
-				if (err && err.providerStatus !== undefined) providerStatus = err.providerStatus;
-				else if (!err || !err.invalid) e.app.logger().error('Génération : erreur inattendue', 'error', lastError);
-			}
-		}
-
-		for (let attempt = 0; attempt < MAX_ATTEMPTS && rule.rule_type === 'multiple_choice'; attempt++) {
-			try {
-				const candidate = g.callGenerate(cfg, rule, body, attempt);
-				const v = g.validateExercise(candidate, rule, body.num_blanks);
-				if (!v.error) {
-					blanks = v.blanks;
-					exerciseText = candidate.text;
-					break;
-				}
-				lastError = v.error;
-				e.app.logger().warn(`Génération : tentative ${attempt + 1} invalide`, 'error', v.error);
-			} catch (err) {
-				lastError = String((err && err.message) || err);
-				e.app.logger().warn(`Génération : tentative ${attempt + 1} échouée`, 'error', lastError);
-				if (err && err.providerStatus !== undefined) {
-					// Erreur provider (429, 401, 5xx…) : inutile de retenter.
-					providerStatus = err.providerStatus;
-					break;
-				}
-			}
-		}
-
-		if (!blanks) {
-			if (providerStatus === 429) {
-				return e.json(429, {
-					error:
-						'Quota du provider LLM dépassé pour le moment. Patiente quelques minutes (rate limit par minute) ou vérifie ton quota journalier.',
-					debug: lastError
-				});
-			}
-			if (providerStatus === 401 || providerStatus === 403) {
-				return e.json(providerStatus, {
-					error: 'Clé API LLM invalide ou non autorisée côté serveur.',
-					debug: lastError
-				});
-			}
-			if (providerStatus !== null) {
-				return e.json(502, {
-					error: `Le provider LLM a renvoyé une erreur (HTTP ${providerStatus}). Réessaie dans un instant.`,
-					debug: lastError
-				});
-			}
-			return e.json(422, {
-				error: "L'IA n'a pas réussi à générer un exercice valide. Réessaie dans un instant ou modifie le thème.",
-				debug: lastError
-			});
-		}
-
-		const record = new Record(e.app.findCollectionByNameOrId('exercises'));
-		record.set('owner', e.auth.id);
-		record.set('owner_username', e.auth.getString('username'));
-		record.set('rule', rule.id);
-		record.set('theme', theme);
-		record.set('grade_level', body.grade_level);
-		// Ponctuation : nombre de signes attendus (≠ nombre de phrases demandé).
-		record.set('num_blanks', blanks.length);
-		record.set('text', exerciseText);
-		record.set('blanks', blanks);
-		record.set('llm_model', llmModel);
-		if (extra) record.set('extra', extra);
-		record.set('verified', false);
-
-		try {
-			e.app.save(record);
-		} catch (err) {
-			e.app.logger().error('Sauvegarde exercice échouée', 'error', String(err));
-			return e.json(500, { error: 'Sauvegarde échouée.' });
-		}
-
+		const out = require(`${__hooks}/lib/generation.js`).generateExercise(e.app, e.auth, body || {});
+		if (!out.record) return e.json(out.status, { error: out.error, debug: out.debug });
 		return e.json(200, {
-			id: record.id,
-			text: exerciseText,
-			blanks: blanks.map((b) => ({ position: b.position })),
-			rule: { id: rule.id, display_name: rule.display_name, candidates: rule.candidates }
+			id: out.record.id,
+			text: out.record.getString('text'),
+			blanks: (g.jsonField(out.record, 'blanks') || []).map((b) => ({ position: b.position })),
+			rule: { id: out.rule.id, display_name: out.rule.display_name, candidates: out.rule.candidates }
 		});
 	},
 	$apis.requireAuth('users')
@@ -402,64 +239,19 @@ routerAdd(
 			return e.json(404, { error: 'Exercice introuvable.' });
 		}
 
-		const exercise = {
-			id: exRecord.id,
-			rule: exRecord.getString('rule'),
-			grade_level: exRecord.getString('grade_level'),
-			blanks: g.jsonField(exRecord, 'blanks') || [],
-			extra: g.jsonField(exRecord, 'extra')
-		};
-
-		let ruleRecord;
+		const gr = require(`${__hooks}/lib/grading.js`);
+		const exercise = gr.exerciseData(exRecord);
+		let rule;
 		try {
-			ruleRecord = e.app.findRecordById('rules', exercise.rule);
+			rule = gr.loadRule(e.app, exercise.rule);
 		} catch (_) {
 			return e.json(500, { error: 'Règle introuvable.' });
 		}
-		const rule = {
-			display_name: ruleRecord.getString('display_name'),
-			short_description: ruleRecord.getString('short_description'),
-			rule_type: ruleRecord.getString('rule_type'),
-			candidates: g.jsonField(ruleRecord, 'candidates') || [],
-			groups: g.jsonField(ruleRecord, 'groups')
-		};
-		// Mode difficile : homophones (tous les candidats) ou QCM dont le passage
-		// surligné est masqué (config.hard_mode = 'hide_highlight').
-		const ruleConfig = g.jsonField(ruleRecord, 'config') || {};
-		const hardMode =
-			body.hard_mode === true &&
-			(rule.rule_type === 'multiple_choice' ||
-				rule.rule_type === 'transform' ||
-				ruleConfig.hard_mode === 'hide_highlight');
-
-		// Ne garde que des réponses texte courtes.
-		const responses = {};
-		for (const k of Object.keys(body.responses)) {
-			const v = body.responses[k];
-			// Transformations : une phrase entière ; ailleurs, un mot ou des indices.
-			const maxLen = rule.rule_type === 'transform' ? 300 : 100;
-			if (typeof v === 'string' && v.length <= maxLen && /^\d{1,3}$/.test(k)) responses[k] = v;
-		}
-
-		let grading;
-		if (rule.rule_type === 'qcm' || rule.rule_type === 'free_text') {
-			grading = require(`${__hooks}/lib/exercises.js`).grade(rule.rule_type, exercise, responses);
-		} else if (rule.rule_type === 'span') {
-			grading = require(`${__hooks}/lib/span_punct.js`).gradeSpan(exercise, responses);
-		} else if (rule.rule_type === 'transform') {
-			// Mode difficile = réponses écrites, corrigées par l'IA après des contrôles sans IA.
-			grading = require(`${__hooks}/lib/transform.js`).gradeTransform(
-				exercise,
-				responses,
-				hardMode,
-				g.llmConfig(),
-				e.app.logger()
-			);
-		} else if (rule.rule_type === 'punctuation') {
-			grading = require(`${__hooks}/lib/span_punct.js`).gradePunctuation(exercise, responses, exercise.extra);
-		} else {
-			grading = g.grade(exercise, responses, rule);
-		}
+		// Mode difficile : homophones (tous les candidats), transformations écrites,
+		// ou QCM dont le passage surligné est masqué (config.hard_mode = 'hide_highlight').
+		const hardMode = body.hard_mode === true && gr.hardModeAllowed(rule);
+		const responses = gr.cleanResponses(rule.rule_type, body.responses);
+		const grading = gr.gradeExercise(exercise, rule, responses, hardMode, e.app.logger());
 		if (grading.score_total === 0) {
 			return e.json(400, { error: 'Aucune réponse fournie.' });
 		}
@@ -955,8 +747,34 @@ routerAdd(
 		}
 
 		const rules = suivi.loadRules(e.app);
+		// Évaluations rendues (celles que j'ai données ; l'admin : toutes).
+		const evalsOf = (sid) =>
+			e.app
+				.findRecordsByFilter(
+					'eval_submissions',
+					role === 'admin'
+						? "student = {:s} && submitted_at != ''"
+						: "student = {:s} && submitted_at != '' && evaluation.author = {:me}",
+					'-submitted_at',
+					20,
+					0,
+					{ s: sid, me: e.auth.id }
+				)
+				.map((sub) => {
+					let title = '';
+					try {
+						title = e.app.findRecordById('evaluations', sub.getString('evaluation')).getString('title');
+					} catch (_) {}
+					return {
+						evaluation: sub.getString('evaluation'),
+						title,
+						submitted_at: sub.getString('submitted_at'),
+						note20: sub.getFloat('note20')
+					};
+				});
 		const out = students.map((st) => {
 			const stats = suivi.studentStats(suivi.loadAttempts(e.app, st.id), rules);
+			stats.evaluations = evalsOf(st.id);
 			return Object.assign(
 				{
 					id: st.id,
@@ -972,3 +790,540 @@ routerAdd(
 	},
 	$apis.requireAuth('users')
 );
+
+// ────────────────────────────────────────────────────────────────────────────
+// Évaluations (prof, parent) : préparation, passage par l'élève, résultats.
+// Les élèves passent UNIQUEMENT par ces routes : sujets sans réponses.
+// ────────────────────────────────────────────────────────────────────────────
+
+// Création : auteur, statut, parties posés par le serveur.
+onRecordCreateRequest((e) => {
+	const ev = require(`${__hooks}/lib/evals.js`);
+	if (!e.auth || e.auth.collection().name !== 'users') throw new ForbiddenError('Connexion requise.');
+	e.record.set('title', String(e.record.getString('title')).replace(/\s+/g, ' ').trim());
+	e.record.set('author', e.auth.id);
+	e.record.set('author_username', e.auth.getString('username'));
+	e.record.set('status', 'draft');
+	e.record.set('parts', []);
+	e.record.set('correction_released', false);
+	if (!e.record.getString('correction_mode')) e.record.set('correction_mode', 'after_close');
+	const data = ev.evalData(e.record);
+	const err =
+		ev.validateSettings(data, false) || ev.validateTargets(e.app, e.auth, data.classes, data.students);
+	if (err) throw new BadRequestError(err);
+	if (e.app.countRecords('evaluations', $dbx.hashExp({ author: e.auth.id, status: 'draft' })) >= 30) {
+		throw new BadRequestError("Tu as déjà 30 évaluations en préparation : supprimes-en avant d'en créer d'autres.");
+	}
+	e.next();
+}, 'evaluations');
+
+// Modification : réglages, élèves visés, barème. Les exercices des parties ne
+// changent que par les routes dédiées, et plus du tout une fois des copies commencées.
+onRecordUpdateRequest((e) => {
+	const ev = require(`${__hooks}/lib/evals.js`);
+	const original = e.record.original();
+	for (const f of ['author', 'author_username', 'status', 'correction_released']) e.record.set(f, original.get(f));
+	e.record.set('title', String(e.record.getString('title')).replace(/\s+/g, ' ').trim());
+
+	const before = ev.evalData(original);
+	const data = ev.evalData(e.record);
+	const started = ev.countSubmissions(e.app, e.record.id) > 0;
+
+	// Parties : mêmes exercices (ordre libre), barème et mode difficile modifiables.
+	const oldIds = before.parts.map((p) => p.exercise).sort().join(',');
+	const newIds = (Array.isArray(data.parts) ? data.parts : []).map((p) => p && p.exercise).sort().join(',');
+	if (oldIds !== newIds) throw new BadRequestError('Les exercices se modifient avec les boutons de chaque partie.');
+	const gr = require(`${__hooks}/lib/grading.js`);
+	const parts = data.parts.map((p) => {
+		const old = before.parts.find((o) => o.exercise === p.exercise);
+		let hard = !!p.hard_mode;
+		if (hard) {
+			try {
+				hard = gr.hardModeAllowed(gr.loadRule(e.app, e.app.findRecordById('exercises', p.exercise).getString('rule')));
+			} catch (_) {
+				hard = false;
+			}
+		}
+		return Object.assign({}, old, { points: Number(p.points), hard_mode: hard });
+	});
+	if (started && JSON.stringify(parts) !== JSON.stringify(before.parts)) {
+		throw new BadRequestError('Des élèves ont déjà commencé : les parties et le barème ne peuvent plus changer.');
+	}
+	e.record.set('parts', parts);
+	data.parts = parts;
+
+	const err =
+		ev.validateSettings(data, data.status === 'published') ||
+		ev.validateTargets(e.app, e.auth, data.classes, data.students);
+	if (err) throw new BadRequestError(err);
+	e.next();
+}, 'evaluations');
+
+// Exercices d'une évaluation : figés dès qu'une copie existe, jamais supprimés à la main.
+onRecordUpdateRequest((e) => {
+	const evalId = e.record.original().getString('evaluation');
+	if (evalId) {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		if (ev.countSubmissions(e.app, evalId) > 0) {
+			throw new BadRequestError('Des élèves ont déjà commencé cette évaluation : son contenu ne peut plus changer.');
+		}
+	}
+	e.next();
+}, 'exercises');
+onRecordDeleteRequest((e) => {
+	if (e.record.getString('evaluation')) {
+		throw new BadRequestError("Cet exercice fait partie d'une évaluation : retire-le depuis l'évaluation.");
+	}
+	e.next();
+}, 'exercises');
+
+// Liste des évaluations de l'auteur, avec l'avancement.
+routerAdd(
+	'GET',
+	'/api/gram/evals',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const role = e.auth.getString('role');
+		if (role !== 'prof' && role !== 'parent' && role !== 'admin') return e.json(403, { error: 'Réservé aux parents et aux professeurs.' });
+		const now = Date.now();
+		const recs = e.app.findRecordsByFilter('evaluations', 'author = {:me}', '-created', 200, 0, { me: e.auth.id });
+		const out = recs.map((rec) => {
+			const data = ev.evalData(rec);
+			const subs = e.app.findRecordsByFilter('eval_submissions', 'evaluation = {:e}', '', 0, 0, { e: rec.id });
+			const done = subs.filter((s) => s.getString('submitted_at'));
+			return {
+				id: data.id,
+				title: data.title,
+				status: data.status,
+				state: ev.evalState(data, now),
+				grade_level: data.grade_level,
+				opens_at: data.opens_at || null,
+				closes_at: data.closes_at || null,
+				parts_count: data.parts.length,
+				targets: ev.targetIds(e.app, data).length,
+				started: subs.length,
+				submitted: done.length,
+				average20: done.length
+					? Math.round((done.reduce((a, s) => a + s.getFloat('note20'), 0) / done.length) * 10) / 10
+					: null,
+				created: data.created
+			};
+		});
+		return e.json(200, { evaluations: out });
+	},
+	$apis.requireAuth('users')
+);
+
+// Ajouter une partie : l'exercice est généré une fois pour toute la classe.
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/parts',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const gr = require(`${__hooks}/lib/grading.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		if (ev.countSubmissions(e.app, l.ev.id) > 0) return e.json(400, { error: 'Des élèves ont déjà commencé : impossible d\'ajouter une partie.' });
+		if (l.ev.parts.length >= ev.MAX_PARTS) return e.json(400, { error: `${ev.MAX_PARTS} parties au maximum.` });
+		const body = g.readJsonBody(e) || {};
+		const request = {
+			rule_id: String(body.rule_id || ''),
+			theme: String(body.theme || '').trim(),
+			grade_level: l.ev.grade_level || String(body.grade_level || ''),
+			num_blanks: Number(body.num_blanks)
+		};
+		const out = require(`${__hooks}/lib/generation.js`).generateExercise(e.app, e.auth, request, { evaluation: l.ev.id });
+		if (!out.record) return e.json(out.status, { error: out.error, debug: out.debug });
+		const points = Math.min(100, Math.max(1, Math.round(Number(body.points) || 10)));
+		const part = {
+			exercise: out.record.id,
+			points,
+			hard_mode: body.hard_mode === true && gr.hardModeAllowed(out.rule),
+			request: { rule_id: request.rule_id, theme: request.theme, num_blanks: request.num_blanks }
+		};
+		// Relu après la génération (qui peut durer) pour ne rien écraser.
+		const rec = e.app.findRecordById('evaluations', l.ev.id);
+		const parts = (g.jsonField(rec, 'parts') || []).concat([part]);
+		rec.set('parts', parts);
+		e.app.save(rec);
+		return e.json(200, { part: ev.partInfo(e.app, part).summary });
+	},
+	$apis.requireAuth('users')
+);
+
+// Regénérer une partie (mêmes notion, thème et nombre de questions).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/parts/{ex}/regenerate',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		if (ev.countSubmissions(e.app, l.ev.id) > 0) return e.json(400, { error: 'Des élèves ont déjà commencé : le sujet est figé.' });
+		const exId = e.request.pathValue('ex');
+		const part = l.ev.parts.find((p) => p.exercise === exId);
+		if (!part) return e.json(404, { error: 'Partie introuvable.' });
+		let request = part.request;
+		if (!request) {
+			const old = e.app.findRecordById('exercises', exId);
+			request = { rule_id: old.getString('rule'), theme: old.getString('theme'), num_blanks: old.getInt('num_blanks') };
+		}
+		const out = require(`${__hooks}/lib/generation.js`).generateExercise(
+			e.app,
+			e.auth,
+			Object.assign({}, request, { grade_level: l.ev.grade_level }),
+			{ evaluation: l.ev.id }
+		);
+		if (!out.record) return e.json(out.status, { error: out.error, debug: out.debug });
+		const rec = e.app.findRecordById('evaluations', l.ev.id);
+		const parts = (g.jsonField(rec, 'parts') || []).map((p) =>
+			p.exercise === exId ? Object.assign({}, p, { exercise: out.record.id, request }) : p
+		);
+		rec.set('parts', parts);
+		e.app.save(rec);
+		try {
+			e.app.delete(e.app.findRecordById('exercises', exId));
+		} catch (_) {}
+		return e.json(200, { part: ev.partInfo(e.app, parts.find((p) => p.exercise === out.record.id)).summary });
+	},
+	$apis.requireAuth('users')
+);
+
+// Retirer une partie.
+routerAdd(
+	'DELETE',
+	'/api/gram/evals/{id}/parts/{ex}',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		if (ev.countSubmissions(e.app, l.ev.id) > 0) return e.json(400, { error: 'Des élèves ont déjà commencé : le sujet est figé.' });
+		const exId = e.request.pathValue('ex');
+		const parts = l.ev.parts.filter((p) => p.exercise !== exId);
+		if (parts.length === l.ev.parts.length) return e.json(404, { error: 'Partie introuvable.' });
+		if (!parts.length && l.ev.status === 'published') {
+			return e.json(400, { error: "Une évaluation publiée doit garder au moins une partie." });
+		}
+		l.rec.set('parts', parts);
+		e.app.save(l.rec);
+		try {
+			e.app.delete(e.app.findRecordById('exercises', exId));
+		} catch (_) {}
+		return e.json(200, { ok: true });
+	},
+	$apis.requireAuth('users')
+);
+
+// Publier (les élèves la voient) / repasser en préparation (si personne n'a commencé).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/publish',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		const publish = (g.readJsonBody(e) || {}).publish !== false;
+		if (publish) {
+			const err = ev.validateSettings(l.ev, true) || ev.validateTargets(e.app, e.auth, l.ev.classes, l.ev.students);
+			if (err) return e.json(400, { error: err });
+			l.rec.set('status', 'published');
+		} else {
+			if (ev.countSubmissions(e.app, l.ev.id) > 0) {
+				return e.json(400, { error: 'Des élèves ont déjà commencé : impossible de la repasser en préparation.' });
+			}
+			l.rec.set('status', 'draft');
+		}
+		e.app.save(l.rec);
+		return e.json(200, { status: l.rec.getString('status') });
+	},
+	$apis.requireAuth('users')
+);
+
+// Donner la correction aux élèves (mode « quand je la publie »).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/release',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		l.rec.set('correction_released', true);
+		e.app.save(l.rec);
+		return e.json(200, { correction_released: true });
+	},
+	$apis.requireAuth('users')
+);
+
+// Résultats de la classe.
+routerAdd(
+	'GET',
+	'/api/gram/evals/{id}/results',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const g = require(`${__hooks}/lib/gram.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), false);
+		if (l.error) return e.json(l.status, { error: l.error });
+		const now = Date.now();
+		const subs = e.app
+			.findRecordsByFilter('eval_submissions', 'evaluation = {:e}', '', 0, 0, { e: l.ev.id })
+			.map((s) => ev.finalizeIfOverdue(e.app, s, l.ev, now));
+		const byStudent = {};
+		for (const s of subs) byStudent[s.getString('student')] = s;
+
+		// Classes visées : nom de la classe de chaque élève.
+		const classNames = {};
+		const classesOut = [];
+		for (const c of l.ev.classes) {
+			let rec;
+			try {
+				rec = e.app.findRecordById('classes', c);
+			} catch (_) {
+				continue;
+			}
+			classesOut.push({ id: rec.id, name: rec.getString('name') });
+			for (const m of e.app.findRecordsByFilter('class_members', 'class = {:c}', '', 0, 0, { c })) {
+				const sid = m.getString('student');
+				(classNames[sid] = classNames[sid] || []).push(rec.getString('name'));
+			}
+		}
+		const ids = ev.targetIds(e.app, l.ev);
+		for (const sid of Object.keys(byStudent)) if (ids.indexOf(sid) < 0) ids.push(sid);
+		const users = ids.length ? e.app.findRecordsByIds('users', ids) : [];
+		const students = users
+			.map((u) => {
+				const s = byStudent[u.id];
+				const row = {
+					id: u.id,
+					username: u.getString('username'),
+					classes: classNames[u.id] || [],
+					status: !s ? 'not_started' : s.getString('submitted_at') ? 'submitted' : 'in_progress',
+					submission_id: s ? s.id : null
+				};
+				if (s) {
+					row.started_at = s.getString('started_at');
+					row.submitted_at = s.getString('submitted_at') || null;
+					row.auto_submitted = s.getBool('auto_submitted');
+					if (row.submitted_at) {
+						row.note20 = s.getFloat('note20');
+						row.score_points = s.getFloat('score_points');
+						row.total_points = s.getFloat('total_points');
+						row.parts = (g.jsonField(s, 'results') || []).map((r) => ({
+							exercise: r.exercise,
+							earned: r.earned,
+							points: r.points,
+							score: r.score,
+							score_total: r.score_total
+						}));
+					}
+				}
+				return row;
+			})
+			.sort((a, b) => a.username.localeCompare(b.username));
+
+		const done = subs.filter((s) => s.getString('submitted_at'));
+		const notes = done.map((s) => s.getFloat('note20'));
+		return e.json(200, {
+			evaluation: Object.assign({}, l.ev, {
+				state: ev.evalState(l.ev, now),
+				parts: ev.partSummaries(e.app, l.ev),
+				classes: classesOut,
+				correction_visible: ev.correctionVisible(l.ev, now),
+				started: subs.length
+			}),
+			students,
+			stats: {
+				submitted: done.length,
+				average20: notes.length ? Math.round((notes.reduce((a, b) => a + b, 0) / notes.length) * 10) / 10 : null,
+				min20: notes.length ? Math.min.apply(null, notes) : null,
+				max20: notes.length ? Math.max.apply(null, notes) : null,
+				questions: ev.questionStats(l.ev.parts, done.map((s) => g.jsonField(s, 'results') || []))
+			}
+		});
+	},
+	$apis.requireAuth('users')
+);
+
+// Copie corrigée d'un élève (vue de l'auteur).
+routerAdd(
+	'GET',
+	'/api/gram/evals/{id}/copies/{sub}',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), false);
+		if (l.error) return e.json(l.status, { error: l.error });
+		let sub;
+		try {
+			sub = e.app.findRecordById('eval_submissions', e.request.pathValue('sub'));
+		} catch (_) {
+			return e.json(404, { error: 'Copie introuvable.' });
+		}
+		if (sub.getString('evaluation') !== l.ev.id) return e.json(404, { error: 'Copie introuvable.' });
+		sub = ev.finalizeIfOverdue(e.app, sub, l.ev, Date.now());
+		if (!sub.getString('submitted_at')) return e.json(400, { error: "L'élève n'a pas encore rendu sa copie." });
+		return e.json(
+			200,
+			Object.assign({ student_username: sub.getString('student_username'), title: l.ev.title }, ev.correctedCopy(e.app, l.ev, sub))
+		);
+	},
+	$apis.requireAuth('users')
+);
+
+// Élève : ses évaluations.
+routerAdd(
+	'GET',
+	'/api/gram/evals/mine',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		if (e.auth.getString('role') !== 'eleve') return e.json(200, { evaluations: [] });
+		const now = Date.now();
+		const myClasses = ev.classIdsOf(e.app, e.auth.id);
+		const params = { me: e.auth.id };
+		let filter = "status = 'published' && (students.id ?= {:me}";
+		myClasses.forEach((c, i) => {
+			params[`c${i}`] = c;
+			filter += ` || classes.id ?= {:c${i}}`;
+		});
+		filter += ')';
+		const recs = e.app.findRecordsByFilter('evaluations', filter, '-created', 200, 0, params);
+		const out = recs.map((rec) => {
+			const data = ev.evalData(rec);
+			const state = ev.evalState(data, now);
+			let sub = ev.findSubmission(e.app, data.id, e.auth.id);
+			if (sub) sub = ev.finalizeIfOverdue(e.app, sub, data, now);
+			const submitted = sub && sub.getString('submitted_at');
+			const visible = ev.correctionVisible(data, now);
+			return {
+				id: data.id,
+				title: data.title,
+				author_username: data.author_username,
+				state,
+				opens_at: data.opens_at || null,
+				closes_at: data.closes_at || null,
+				time_limit_min: data.time_limit_min,
+				parts_count: data.parts.length,
+				status: submitted ? 'submitted' : sub ? 'in_progress' : state === 'closed' ? 'missed' : 'todo',
+				submitted_at: submitted || null,
+				correction_visible: !!submitted && visible,
+				note20: submitted && visible ? sub.getFloat('note20') : null
+			};
+		});
+		return e.json(200, { evaluations: out });
+	},
+	$apis.requireAuth('users')
+);
+
+// Élève : présentation, sujet (sans réponses) ou copie corrigée.
+routerAdd(
+	'GET',
+	'/api/gram/evals/{id}/paper',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForStudent(e.app, e.auth, e.request.pathValue('id'));
+		if (l.error) return e.json(l.status, { error: l.error });
+		return e.json(200, ev.studentView(e.app, l.ev, ev.findSubmission(e.app, l.ev.id, e.auth.id), Date.now()));
+	},
+	$apis.requireAuth('users')
+);
+
+// Élève : commencer (une seule tentative ; le chrono part maintenant).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/start',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForStudent(e.app, e.auth, e.request.pathValue('id'));
+		if (l.error) return e.json(l.status, { error: l.error });
+		const now = Date.now();
+		let sub = ev.findSubmission(e.app, l.ev.id, e.auth.id);
+		if (!sub) {
+			const state = ev.evalState(l.ev, now);
+			if (state === 'upcoming') return e.json(400, { error: "Cette évaluation n'a pas encore commencé." });
+			if (state === 'closed') return e.json(400, { error: 'Cette évaluation est terminée.' });
+			sub = new Record(e.app.findCollectionByNameOrId('eval_submissions'));
+			sub.set('evaluation', l.ev.id);
+			sub.set('student', e.auth.id);
+			sub.set('student_username', e.auth.getString('username'));
+			sub.set('started_at', new DateTime());
+			sub.set('responses', {});
+			try {
+				e.app.save(sub);
+			} catch (_) {
+				// Double clic : la copie existe déjà.
+				sub = ev.findSubmission(e.app, l.ev.id, e.auth.id);
+				if (!sub) return e.json(500, { error: 'Impossible de commencer.' });
+			}
+		}
+		return e.json(200, ev.studentView(e.app, l.ev, sub, now));
+	},
+	$apis.requireAuth('users')
+);
+
+// Élève : sauvegarde des réponses en cours (toutes les quelques secondes).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/save',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForStudent(e.app, e.auth, e.request.pathValue('id'));
+		if (l.error) return e.json(l.status, { error: l.error });
+		const sub = ev.findSubmission(e.app, l.ev.id, e.auth.id);
+		if (!sub) return e.json(400, { error: "Tu n'as pas commencé cette évaluation." });
+		if (sub.getString('submitted_at')) return e.json(409, { error: 'Copie déjà rendue.' });
+		const now = Date.now();
+		const d = ev.deadlineOf(l.ev, ev.ms(sub.getString('started_at')));
+		if (d !== null && now > d + ev.GRACE_MS) {
+			ev.finalize(e.app, sub, l.ev, true);
+			return e.json(409, { error: 'Le temps est écoulé : ta copie a été rendue.' });
+		}
+		sub.set('responses', ev.cleanAllResponses(e.app, l.ev, (g.readJsonBody(e) || {}).responses));
+		e.app.save(sub);
+		return e.json(200, { saved_at: ev.iso(now) });
+	},
+	$apis.requireAuth('users')
+);
+
+// Élève : rendre sa copie.
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/submit',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForStudent(e.app, e.auth, e.request.pathValue('id'));
+		if (l.error) return e.json(l.status, { error: l.error });
+		let sub = ev.findSubmission(e.app, l.ev.id, e.auth.id);
+		if (!sub) return e.json(400, { error: "Tu n'as pas commencé cette évaluation." });
+		const now = Date.now();
+		if (!sub.getString('submitted_at')) {
+			const d = ev.deadlineOf(l.ev, ev.ms(sub.getString('started_at')));
+			const late = d !== null && now > d + ev.GRACE_MS;
+			// En retard : on garde les dernières réponses enregistrées à temps.
+			if (!late) sub.set('responses', ev.cleanAllResponses(e.app, l.ev, (g.readJsonBody(e) || {}).responses));
+			sub = ev.finalize(e.app, sub, l.ev, late);
+		}
+		return e.json(200, ev.studentView(e.app, l.ev, sub, now));
+	},
+	$apis.requireAuth('users')
+);
+
+// Copies dont le temps est écoulé sans que l'élève les ait rendues.
+cronAdd('gram_eval_finalize', '*/5 * * * *', () => {
+	const ev = require(`${__hooks}/lib/evals.js`);
+	const now = Date.now();
+	const pending = $app.findRecordsByFilter('eval_submissions', "submitted_at = ''", '', 500, 0);
+	const cache = {};
+	for (const sub of pending) {
+		try {
+			const id = sub.getString('evaluation');
+			cache[id] = cache[id] || ev.evalData($app.findRecordById('evaluations', id));
+			ev.finalizeIfOverdue($app, sub, cache[id], now);
+		} catch (err) {
+			$app.logger().error('Évaluation : clôture automatique échouée', 'id', sub.id, 'error', String(err));
+		}
+	}
+});
