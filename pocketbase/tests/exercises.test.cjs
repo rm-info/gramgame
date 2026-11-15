@@ -108,4 +108,34 @@ ok(/irrégulier/.test(e3) && /ils viennent/.test(e3), 'tableau du verbe irrégul
 const cj = require('./load.cjs')('conjugaison.js');
 for (const g of Object.values(cj.POOLS)) for (const byDiff of Object.values(g)) for (const list of Object.values(byDiff)) for (const v of list)
   for (const p of cj.PERSONS) ok(cj.explainForm(v, p).length > 10, `explication vide pour ${v} ${p}`);
+// Anti-répétition : on tire d'abord ce que l'élève n'a pas vu récemment
+{
+  const recent = ex.recencyMap([['a', 'b'], ['c']]);
+  ok(recent.get('a') === 0 && recent.get('c') === 1, 'recencyMap');
+  for (let k = 0; k < 20; k++) {
+    const d = ex.drawN(['a', 'b', 'c', 'd', 'e'], 3, recent);
+    ok(d.slice(0, 2).sort().join() === 'd,e' && d[2] === 'c', 'frais d\'abord, puis le plus ancien : ' + d);
+  }
+  // Élève de CE2 qui enchaîne 3 exercices de 15 verbes (groupes) : aucun verbe
+  // ne revient d'un exercice à l'autre (hors « aller », remis exprès parfois).
+  const history = [];
+  let repeats = 0;
+  for (let k = 0; k < 3; k++) {
+    const verbs = ex.generateVerbGroups(15, 'CE2', ex.recencyMap(history)).blanks.map((b) => b.verb || b.prompt);
+    const seen = new Set(history.flat());
+    repeats += verbs.filter((v) => seen.has(v) && v !== 'aller').length;
+    history.unshift(verbs);
+  }
+  ok(repeats === 0, `groupes CE2 : ${repeats} verbe(s) répété(s) sur 3 exercices`);
+  // Présent, CM2, 3 exercices de 20 trous : pas de verbe répété.
+  const hist2 = [];
+  let rep2 = 0;
+  for (let k = 0; k < 3; k++) {
+    const verbs = ex.pickConjAssignments({ config: { pool: 'present' } }, 20, 'CM2', ex.recencyMap(hist2)).map((a) => a.verb);
+    const seen = new Set(hist2.flat());
+    rep2 += verbs.filter((v) => seen.has(v)).length;
+    hist2.unshift(verbs);
+  }
+  ok(rep2 === 0, `présent CM2 : ${rep2} verbe(s) répété(s) sur 3 exercices`);
+}
 console.log(fail ? `${fail} échec(s)` : 'tout OK'); if (fail) process.exit(1);

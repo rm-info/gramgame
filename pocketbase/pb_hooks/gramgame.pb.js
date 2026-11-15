@@ -260,7 +260,19 @@ routerAdd(
 			// Nouveaux types : générateurs de lib/exercises.js (retries inclus).
 			const ex = require(`${__hooks}/lib/exercises.js`);
 			try {
-				const out = ex.generate(cfg, rule, body, e.app.logger());
+				// Verbes des derniers exercices de l'élève : tirés en dernier pour varier.
+				let recentVerbs = [];
+				try {
+					const recs = e.app.findRecordsByFilter('exercises', 'owner = {:u}', '-created', 8, 0, { u: e.auth.id });
+					recentVerbs = recs.map((r) =>
+						(g.jsonField(r, 'blanks') || [])
+							.map((b) => (b && (b.verb || (typeof b.prompt === 'string' && !/\s/.test(b.prompt) ? b.prompt : ''))) || '')
+							.filter(Boolean)
+					);
+				} catch (err) {
+					e.app.logger().warn('Verbes récents introuvables', 'error', String(err));
+				}
+				const out = ex.generate(cfg, rule, body, e.app.logger(), { recentVerbs });
 				blanks = out.blanks;
 				exerciseText = out.text;
 				if (out.theme) theme = out.theme;
