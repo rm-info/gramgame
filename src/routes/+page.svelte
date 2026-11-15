@@ -59,6 +59,16 @@
 		thème, et l'IA te concocte un exercice sur mesure.
 	</p>
 
+	{#if activeUsername.isSupervisor}
+		<div class="card stack suivi-card">
+			<h2>{activeUsername.role === 'parent' ? 'Le suivi de tes enfants' : 'Le suivi de tes élèves'}</h2>
+			<p class="muted">
+				Leurs exercices, leurs moyennes, les notions acquises et celles à retravailler.
+			</p>
+			<a href={`${base}/suivi`}><button type="button">Ouvrir le tableau de suivi</button></a>
+		</div>
+	{/if}
+
 	<div class="card stack">
 		<h2>Prêt à pratiquer ?</h2>
 		<p class="muted">
@@ -100,6 +110,9 @@
 </section>
 
 <style>
+	.suivi-card {
+		border-left: 4px solid var(--color-primary);
+	}
 	.attempts {
 		list-style: none;
 		padding: 0;

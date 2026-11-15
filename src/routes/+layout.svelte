@@ -28,8 +28,15 @@
 			return;
 		}
 
-		// Pas encore de niveau scolaire pour ce compte : direction onboarding.
-		if (auth.user && !profileState.gradeLevel && !isPublic && path !== '/onboarding') {
+		// Élève sans niveau scolaire : direction onboarding (les parents et les
+		// profs n'en ont pas besoin).
+		if (
+			auth.user &&
+			activeUsername.isStudent &&
+			!profileState.gradeLevel &&
+			!isPublic &&
+			path !== '/onboarding'
+		) {
 			goto(`${base}/onboarding`, { replaceState: true });
 		}
 	});
@@ -90,6 +97,9 @@
 					<a href={`${base}/profile`} class="profile-link">Profil</a>
 				{:else}
 					<a href={`${base}/profile`} class="profile-link">{activeUsername.username}</a>
+				{/if}
+				{#if activeUsername.isSupervisor}
+					<a href={`${base}/suivi`} class="admin-link">Suivi</a>
 				{/if}
 				{#if activeUsername.canEditExercises}
 					<a href={`${base}/admin`} class="admin-link">Gestion</a>

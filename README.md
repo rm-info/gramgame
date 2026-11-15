@@ -150,11 +150,24 @@ Un compte dont le code n'a jamais été saisi reste « en attente » et est supp
 
 ### Rôles
 
-- `user` (défaut) : ses exercices et tentatives.
-- `prof` : voit et édite tous les exercices, peut les marquer « vérifiés ».
-- `admin` : + gestion des rôles, des comptes et des règles.
+- `eleve` (défaut à l'inscription) : fait les exercices, voit ses résultats.
+- `parent` (choisi à l'inscription) : suit ses enfants (tableau de suivi). Pas de niveau scolaire demandé.
+- `prof` (attribué par un admin) : suit ses élèves, voit, modifie, vérifie et supprime tous les exercices. Non proposé à l'inscription pour cette raison.
+- `admin` : + gestion des rôles, des comptes et des règles ; le tableau de suivi montre tous les élèves. Le tout premier compte créé devient admin.
 
-Garde-fous côté serveur (`pb_hooks/gramgame.pb.js`) : impossible de modifier son propre rôle, de rétrograder ou supprimer le dernier admin ; la date et l'auteur de vérification d'un exercice sont posés par le serveur.
+Garde-fous côté serveur (`pb_hooks/gramgame.pb.js`) : impossible de modifier son propre rôle, de rétrograder ou supprimer le dernier admin ; la date et l'auteur de vérification d'un exercice sont posés par le serveur ; demander le rôle prof à l'inscription donne élève.
+
+### Liens élève ↔ parent / professeur et tableau de suivi
+
+Un élève peut être lié à plusieurs parents et plusieurs profs (collection `links`). L'une ou l'autre partie fait la demande avec le nom d'utilisateur de l'autre (profil de l'élève, ou « Gérer mes élèves » dans le suivi), l'autre l'accepte ; si les deux demandent, le lien est établi. Un parent et un enfant inscrits avec **la même adresse mail** sont liés directement. Chacun peut retirer un lien.
+
+`/suivi` (parents, profs, admin) : pour chaque élève lié, dernière activité, nombre d'exercices sur 7 jours, moyennes 7 et 30 jours, maîtrise par notion (**acquis** si la moyenne des 3 dernières tentatives atteint 80 % avec au moins 2 tentatives, **en cours** entre 50 et 80 %, **à retravailler** en dessous), points faibles sur 30 jours (catégories ratées plus d'une fois sur trois : confusion, groupe du verbe, signe de ponctuation…) et dernières tentatives. Les chiffres sont calculés par le serveur (`/api/gram/suivi`, `pb_hooks/lib/suivi.js`) pour les seuls élèves liés : l'adresse mail des familles n'est jamais exposée.
+
+### Classes
+
+Un prof (ou un admin) crée ses classes dans `/suivi` (« Mes classes »). Chaque classe a un **code de 6 caractères** généré par le serveur, sans caractères ambigus (pas de 0/O, 1/I/L), par ex. `K7XQ2M`. L'élève le saisit dans son profil (« Mes classes ») et rejoint la classe tout de suite, sans validation (casse, espaces et tirets ignorés). « Nouveau code » invalide l'ancien ; les élèves déjà inscrits restent. Le prof peut renommer, supprimer une classe ou en retirer un élève ; l'élève peut la quitter. Collections `classes` (le code n'est lisible que par le prof) et `class_members` (créée seulement via `POST /api/gram/classes/join`, limité à 10 essais/min par IP). Limites : 30 classes par prof, 60 élèves par classe, 10 classes par élève.
+
+Le tableau de suivi d'un prof réunit les élèves de ses classes et ceux liés individuellement (sans doublon), avec un filtre par classe.
 
 ## Ajouter une règle de grammaire
 

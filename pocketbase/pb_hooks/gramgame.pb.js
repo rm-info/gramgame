@@ -7,6 +7,10 @@
 //   POST /api/gram/login     { username }              → { otpId, email_hint }
 //   POST /api/gram/generate  { rule_id, theme, grade_level, num_blanks }  (auth)
 //   POST /api/gram/correct   { exercise_id, responses }                   (auth)
+//   POST /api/gram/links, /links/{id}/accept     liens élève ↔ parent/prof  (auth)
+//   POST /api/gram/classes/join { code }         l'élève rejoint une classe (auth)
+//   POST /api/gram/classes/{id}/code             nouveau code de classe     (auth)
+//   GET  /api/gram/suivi                         tableau de suivi           (auth)
 //
 // Le login final se fait côté client avec le SDK :
 //   pb.collection('users').authWithOTP(otpId, code)
@@ -138,7 +142,10 @@ routerAdd('POST', '/api/gram/register', (e) => {
 	user.set('email', g.syntheticEmail(username));
 	user.set('emailVisibility', false);
 	user.set('verified', false);
-	user.set('role', isFirst ? 'admin' : 'user');
+	// Rôle choisi à l'inscription : élève (défaut) ou parent. Le rôle prof
+	// est attribué par un admin (un prof peut modifier tous les exercices).
+	const wanted = body.role === 'parent' ? 'parent' : 'eleve';
+	user.set('role', isFirst ? 'admin' : wanted);
 	user.setRandomPassword();
 
 	try {
@@ -578,7 +585,7 @@ cronAdd('gram_purge_unverified', '17 4 * * *', () => {
 	const limit = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().replace('T', ' ');
 	const stale = $app.findRecordsByFilter(
 		'users',
-		"verified = false && role != 'admin' && created < {:limit}",
+		"verified = false && role != 'admin' && role != 'prof' && created < {:limit}",
 		'',
 		0,
 		0,
@@ -690,3 +697,278 @@ onRecordUpdateRequest((e) => {
 	}
 	e.next();
 }, 'exercises');
+
+// ────────────────────────────────────────────────────────────────────────────
+// Liens élève ↔ parent / prof
+// ────────────────────────────────────────────────────────────────────────────
+
+// Demande de lien par nom d'utilisateur, depuis l'un ou l'autre côté.
+routerAdd(
+	'POST',
+	'/api/gram/links',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const body = g.readJsonBody(e);
+		const me = e.auth;
+		const myRole = me.getString('role');
+		const username = String(body.username || '').trim().toLowerCase();
+		if (!g.USERNAME_RE.test(username)) return e.json(400, { error: "Nom d'utilisateur invalide." });
+		const other = g.findUserByUsername(e.app, username);
+		if (!other) return e.json(404, { error: "Aucun compte avec ce nom d'utilisateur." });
+		if (other.id === me.id) return e.json(400, { error: 'Tu ne peux pas te lier à toi-même.' });
+		const otherRole = other.getString('role');
+
+		let student;
+		let supervisor;
+		if (myRole === 'parent' || myRole === 'prof') {
+			if (otherRole !== 'eleve') return e.json(400, { error: `« ${username} » n'est pas un compte élève.` });
+			student = other;
+			supervisor = me;
+		} else if (myRole === 'eleve') {
+			if (otherRole !== 'parent' && otherRole !== 'prof') {
+				return e.json(400, { error: `« ${username} » n'est pas un compte parent ou professeur.` });
+			}
+			student = me;
+			supervisor = other;
+		} else {
+			return e.json(400, { error: 'Un administrateur voit déjà tous les élèves : pas besoin de lien.' });
+		}
+		const kind = supervisor.getString('role');
+
+		let existing = null;
+		try {
+			existing = e.app.findFirstRecordByFilter('links', 'student = {:s} && supervisor = {:v}', { s: student.id, v: supervisor.id });
+		} catch (_) {}
+		if (existing) {
+			// Les deux côtés ont demandé : on accepte.
+			if (existing.getString('status') === 'pending' && existing.getString('initiated_by') !== me.id) {
+				existing.set('status', 'accepted');
+				e.app.save(existing);
+				return e.json(200, { id: existing.id, status: 'accepted' });
+			}
+			return e.json(409, {
+				error: existing.getString('status') === 'accepted' ? 'Vous êtes déjà liés.' : 'Une demande est déjà en attente.'
+			});
+		}
+
+		// Parent et enfant avec la même adresse mail : même famille, lien direct.
+		const sameFamily =
+			kind === 'parent' &&
+			student.getString('real_email').toLowerCase() === supervisor.getString('real_email').toLowerCase();
+
+		const link = new Record(e.app.findCollectionByNameOrId('links'));
+		link.set('student', student.id);
+		link.set('supervisor', supervisor.id);
+		link.set('kind', kind);
+		link.set('status', sameFamily ? 'accepted' : 'pending');
+		link.set('initiated_by', me.id);
+		link.set('student_username', student.getString('username'));
+		link.set('supervisor_username', supervisor.getString('username'));
+		e.app.save(link);
+		return e.json(200, { id: link.id, status: link.getString('status') });
+	},
+	$apis.requireAuth('users')
+);
+
+// Acceptation d'une demande par la partie qui ne l'a pas faite.
+routerAdd(
+	'POST',
+	'/api/gram/links/{id}/accept',
+	(e) => {
+		let link;
+		try {
+			link = e.app.findRecordById('links', e.request.pathValue('id'));
+		} catch (_) {
+			return e.json(404, { error: 'Demande introuvable.' });
+		}
+		const me = e.auth.id;
+		const party = link.getString('student') === me || link.getString('supervisor') === me;
+		if (!party || link.getString('initiated_by') === me) return e.json(403, { error: 'Tu ne peux pas accepter cette demande.' });
+		link.set('status', 'accepted');
+		e.app.save(link);
+		return e.json(200, { id: link.id, status: 'accepted' });
+	},
+	$apis.requireAuth('users')
+);
+
+// ────────────────────────────────────────────────────────────────────────────
+// Classes (prof) : un code par classe, l'élève qui le saisit rejoint la classe
+// ────────────────────────────────────────────────────────────────────────────
+
+// Création : le prof et le code sont posés par le serveur.
+onRecordCreateRequest((e) => {
+	const cl = require(`${__hooks}/lib/classes.js`);
+	if (!e.auth || e.auth.collection().name !== 'users') throw new ForbiddenError('Connexion requise.');
+	const name = cl.cleanName(e.record.getString('name'));
+	if (!name) throw new BadRequestError('Donne un nom à la classe.');
+	const count = e.app.countRecords('classes', $dbx.hashExp({ teacher: e.auth.id }));
+	if (count >= cl.MAX_CLASSES_PER_TEACHER) {
+		throw new BadRequestError(`Tu as déjà ${cl.MAX_CLASSES_PER_TEACHER} classes : supprimes-en une d'abord.`);
+	}
+	e.record.set('name', name);
+	e.record.set('teacher', e.auth.id);
+	e.record.set('teacher_username', e.auth.getString('username'));
+	e.record.set('code', cl.generateCode(e.app));
+	e.next();
+}, 'classes');
+
+// Renommage : on recopie le nouveau nom chez les élèves (affichage côté élève).
+onRecordUpdateRequest((e) => {
+	const cl = require(`${__hooks}/lib/classes.js`);
+	const original = e.record.original();
+	const name = cl.cleanName(e.record.getString('name'));
+	if (!name) throw new BadRequestError('Donne un nom à la classe.');
+	e.record.set('name', name);
+	// Par sécurité (en plus de la règle d'API) : prof et code non modifiables ici.
+	e.record.set('teacher', original.getString('teacher'));
+	e.record.set('teacher_username', original.getString('teacher_username'));
+	e.record.set('code', original.getString('code'));
+	e.next();
+	if (name !== original.getString('name')) {
+		const members = e.app.findRecordsByFilter('class_members', 'class = {:c}', '', 0, 0, { c: e.record.id });
+		for (const m of members) {
+			m.set('class_name', name);
+			e.app.save(m);
+		}
+	}
+}, 'classes');
+
+// Nouveau code : l'ancien ne marche plus (les élèves déjà inscrits restent).
+routerAdd(
+	'POST',
+	'/api/gram/classes/{id}/code',
+	(e) => {
+		const cl = require(`${__hooks}/lib/classes.js`);
+		let klass;
+		try {
+			klass = e.app.findRecordById('classes', e.request.pathValue('id'));
+		} catch (_) {
+			return e.json(404, { error: 'Classe introuvable.' });
+		}
+		if (klass.getString('teacher') !== e.auth.id && e.auth.getString('role') !== 'admin') {
+			return e.json(403, { error: "Ce n'est pas ta classe." });
+		}
+		klass.set('code', cl.generateCode(e.app));
+		e.app.save(klass);
+		return e.json(200, { id: klass.id, code: klass.getString('code') });
+	},
+	$apis.requireAuth('users')
+);
+
+// Un élève saisit le code : il rejoint la classe tout de suite.
+routerAdd(
+	'POST',
+	'/api/gram/classes/join',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const cl = require(`${__hooks}/lib/classes.js`);
+		if (e.auth.getString('role') !== 'eleve') {
+			return e.json(403, { error: 'Seul un compte élève peut rejoindre une classe avec un code.' });
+		}
+		const code = cl.normalizeCode(g.readJsonBody(e).code);
+		if (!cl.isValidCode(code)) {
+			return e.json(400, { error: `Le code d'une classe fait ${cl.CODE_LENGTH} caractères (lettres et chiffres).` });
+		}
+		let klass;
+		try {
+			klass = e.app.findFirstRecordByFilter('classes', 'code = {:c}', { c: code });
+		} catch (_) {
+			return e.json(404, { error: 'Aucune classe avec ce code. Vérifie-le auprès de ton professeur.' });
+		}
+		let already = false;
+		try {
+			e.app.findFirstRecordByFilter('class_members', 'class = {:c} && student = {:s}', { c: klass.id, s: e.auth.id });
+			already = true;
+		} catch (_) {}
+		if (already) return e.json(409, { error: `Tu fais déjà partie de la classe « ${klass.getString('name')} ».` });
+
+		if (e.app.countRecords('class_members', $dbx.hashExp({ student: e.auth.id })) >= cl.MAX_CLASSES_PER_STUDENT) {
+			return e.json(400, { error: `Tu es déjà dans ${cl.MAX_CLASSES_PER_STUDENT} classes : quittes-en une d'abord.` });
+		}
+		if (e.app.countRecords('class_members', $dbx.hashExp({ class: klass.id })) >= cl.MAX_MEMBERS_PER_CLASS) {
+			return e.json(400, { error: 'Cette classe est complète. Préviens ton professeur.' });
+		}
+
+		const m = new Record(e.app.findCollectionByNameOrId('class_members'));
+		m.set('class', klass.id);
+		m.set('student', e.auth.id);
+		m.set('student_username', e.auth.getString('username'));
+		m.set('class_name', klass.getString('name'));
+		m.set('teacher_username', klass.getString('teacher_username'));
+		e.app.save(m);
+		return e.json(200, {
+			id: m.id,
+			class_name: klass.getString('name'),
+			teacher_username: klass.getString('teacher_username')
+		});
+	},
+	$apis.requireAuth('users')
+);
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tableau de suivi (parents, profs ; admin : tous les élèves)
+// ────────────────────────────────────────────────────────────────────────────
+routerAdd(
+	'GET',
+	'/api/gram/suivi',
+	(e) => {
+		const suivi = require(`${__hooks}/lib/suivi.js`);
+		const role = e.auth.getString('role');
+		if (role !== 'parent' && role !== 'prof' && role !== 'admin') {
+			return e.json(403, { error: 'Réservé aux parents et aux professeurs.' });
+		}
+
+		// Classes du prof (ou de l'admin) et leurs élèves.
+		const classes = [];
+		const classesOf = {}; // id élève → [id classe]
+		if (role === 'prof' || role === 'admin') {
+			const own = e.app.findRecordsByFilter('classes', 'teacher = {:me}', 'name', 100, 0, { me: e.auth.id });
+			for (const c of own) {
+				const members = e.app.findRecordsByFilter('class_members', 'class = {:c}', 'student_username', 200, 0, {
+					c: c.id
+				});
+				for (const m of members) {
+					const sid = m.getString('student');
+					(classesOf[sid] = classesOf[sid] || []).push(c.id);
+				}
+				classes.push({ id: c.id, name: c.getString('name'), code: c.getString('code'), count: members.length });
+			}
+		}
+
+		const linked = {};
+		let students = [];
+		if (role === 'admin') {
+			students = e.app.findRecordsByFilter('users', "role = 'eleve'", 'username', 300, 0);
+		} else {
+			const links = e.app.findRecordsByFilter(
+				'links',
+				"supervisor = {:me} && status = 'accepted'",
+				'student_username',
+				300,
+				0,
+				{ me: e.auth.id }
+			);
+			for (const l of links) linked[l.getString('student')] = true;
+			const ids = Object.keys(linked).concat(Object.keys(classesOf).filter((id) => !linked[id]));
+			students = ids.length ? e.app.findRecordsByIds('users', ids) : [];
+			students.sort((a, b) => a.getString('username').localeCompare(b.getString('username')));
+		}
+
+		const rules = suivi.loadRules(e.app);
+		const out = students.map((st) => {
+			const stats = suivi.studentStats(suivi.loadAttempts(e.app, st.id), rules);
+			return Object.assign(
+				{
+					id: st.id,
+					username: st.getString('username'),
+					grade_level: st.getString('grade_level'),
+					classes: classesOf[st.id] || [],
+					linked: role === 'admin' || !!linked[st.id]
+				},
+				stats
+			);
+		});
+		return e.json(200, { role, classes, students: out });
+	},
+	$apis.requireAuth('users')
+);

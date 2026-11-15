@@ -2,7 +2,9 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { auth } from '$lib/auth.svelte';
-	import { pb, errorMessage } from '$lib/pb';
+	import { pb, errorMessage, ROLE_LABELS } from '$lib/pb';
+	import LinksManager from '$lib/components/LinksManager.svelte';
+	import JoinClass from '$lib/components/JoinClass.svelte';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { GRADE_LEVELS, profileState } from '$lib/profile.svelte';
 
@@ -82,8 +84,8 @@
 
 			<dt>Rôle</dt>
 			<dd>
-				<span class="role-badge role-{activeUsername.role}">{activeUsername.role}</span>
-				{#if activeUsername.role !== 'user'}
+				<span class="role-badge role-{activeUsername.role}">{ROLE_LABELS[activeUsername.role]}</span>
+				{#if activeUsername.role === 'prof' || activeUsername.role === 'admin'}
 					<span class="muted note">(modifiable par un autre administrateur)</span>
 				{/if}
 			</dd>
@@ -115,6 +117,41 @@
 			{/if}
 		</form>
 	</div>
+
+	{#if activeUsername.isStudent}
+		<div class="card stack">
+			<h2>Mes classes</h2>
+			<p class="muted">
+				Avec le code de classe donné par ton professeur, tu rejoins sa classe tout de suite : il voit alors tes
+				résultats.
+			</p>
+			<JoinClass />
+		</div>
+	{:else if activeUsername.role === 'prof'}
+		<div class="card stack">
+			<h2>Mes classes</h2>
+			<p class="muted">
+				Tes classes et leurs codes se gèrent dans le <a href={`${base}/suivi`}>tableau de suivi</a>.
+			</p>
+		</div>
+	{/if}
+
+	{#if !activeUsername.isAdmin}
+		<div class="card stack">
+			<h2>{activeUsername.isStudent ? 'Mes parents et professeurs' : 'Mes élèves'}</h2>
+			{#if activeUsername.isStudent}
+				<p class="muted">
+					Les personnes liées voient tes résultats (notes, notions travaillées), jamais ton adresse
+					mail.
+				</p>
+			{:else}
+				<p class="muted">
+					Les résultats de tes élèves sont dans le <a href={`${base}/suivi`}>tableau de suivi</a>.
+				</p>
+			{/if}
+			<LinksManager />
+		</div>
+	{/if}
 
 	<div class="card stack danger-zone">
 		<h2>Zone dangereuse</h2>
@@ -178,6 +215,10 @@
 	.role-badge.role-admin {
 		background: rgba(184, 51, 60, 0.12);
 		color: var(--color-error);
+	}
+	.role-badge.role-parent {
+		background: rgba(164, 106, 0, 0.12);
+		color: #8a5a00;
 	}
 	.role-badge.role-prof {
 		background: rgba(46, 139, 87, 0.15);
