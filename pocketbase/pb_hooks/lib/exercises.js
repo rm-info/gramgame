@@ -22,15 +22,41 @@ function shuffle(arr) {
 	return a;
 }
 
-/** Tire n éléments : sans répétition tant que possible, puis on recommence. */
-function drawN(pool, n) {
+/**
+ * Tire n éléments sans répétition tant que possible, puis recommence.
+ * recent (optionnel) : Map élément → rang de l'exercice où l'élève l'a vu
+ * (0 = le plus récent). On tire d'abord ce qu'il n'a pas vu récemment, puis
+ * ce qu'il a vu il y a le plus longtemps.
+ */
+function drawN(pool, n, recent) {
+	const order = () => {
+		if (!recent || !recent.size) return shuffle(pool);
+		const fresh = shuffle(pool.filter((v) => !recent.has(v)));
+		const stale = shuffle(pool.filter((v) => recent.has(v))).sort((a, b) => recent.get(b) - recent.get(a));
+		return fresh.concat(stale);
+	};
 	const out = [];
 	let bag = [];
 	while (out.length < n) {
-		if (bag.length === 0) bag = shuffle(pool);
-		out.push(bag.pop());
+		if (bag.length === 0) bag = order();
+		out.push(bag.shift());
 	}
 	return out;
+}
+
+/**
+ * Verbes des derniers exercices de l'élève → Map verbe → rang (0 = exercice
+ * le plus récent). lists : [[verbes de l'exercice le plus récent], …].
+ */
+function recencyMap(lists) {
+	const m = new Map();
+	(Array.isArray(lists) ? lists : []).forEach((verbs, rank) => {
+		for (const v of Array.isArray(verbs) ? verbs : []) {
+			const k = String(v).trim().toLowerCase();
+			if (k && !m.has(k)) m.set(k, rank);
+		}
+	});
+	return m;
 }
 
 /** Répartit n tirages selon des poids { clé: poids } (arrondi, total exact). */
@@ -52,14 +78,14 @@ function spread(n, weights) {
  * Tire n verbes d'un réservoir { difficulté: [verbes] } selon le palier du
  * niveau scolaire (mélange de difficultés défini dans conj.TIER_MIX).
  */
-function drawLeveled(poolByDiff, n, tier) {
+function drawLeveled(poolByDiff, n, tier, recent) {
 	const mix = conj.TIER_MIX[tier] || conj.TIER_MIX[2];
 	const weights = {};
 	for (const d of Object.keys(mix)) if (poolByDiff[d] && poolByDiff[d].length) weights[d] = mix[d];
 	if (!Object.keys(weights).length) weights[Object.keys(poolByDiff)[0]] = 1;
 	const counts = spread(n, weights);
 	let out = [];
-	for (const d of Object.keys(counts)) out = out.concat(drawN(poolByDiff[d], counts[d]));
+	for (const d of Object.keys(counts)) out = out.concat(drawN(poolByDiff[d], counts[d], recent));
 	return out;
 }
 
@@ -99,7 +125,8 @@ function groupExplanation(verb, group) {
 
 const SUBJECTS = { '1s': ['je'], '2s': ['tu'], '3s': ['il', 'elle', 'on'], '1p': ['nous'], '2p': ['vous'], '3p': ['ils', 'elles'] };
 const REFLEXIVE = { '1s': 'me', '2s': 'te', '3s': 'se', '1p': 'nous', '2p': 'vous', '3p': 'se' };
-const startsWithVowel = (w) => /^[aeiouyéèêëàâîïôûœ]/i.test(w);
+// Voyelle ou h muet (« j'habite »), pas h aspiré (« je hais »).
+const startsWithVowel = (w) => conj.elidesBefore(w);
 
 function pickOne(arr) {
 	return arr[Math.floor(Math.random() * arr.length)];
@@ -143,17 +170,19 @@ function allowedPersons(verb) {
 	return entry && typeof entry === 'object' && Array.isArray(entry.p) ? entry.p : conj.PERSONS;
 }
 
-function generateVerbGroups(numItems, grade) {
+function generateVerbGroups(numItems, grade, recent) {
 	const pools = conj.POOLS.groups;
 	const tier = conj.levelTier(grade);
 	// À peu près un tiers par groupe ; difficulté des verbes selon le niveau.
 	const counts = spread(numItems, { 1: 1, 2: 1, 3: 1 });
 	let verbs = [];
 	for (const k of Object.keys(counts)) {
-		verbs = verbs.concat(drawLeveled(pools[k], counts[k], tier).map((v) => ({ verb: v, group: Number(k) })));
+		verbs = verbs.concat(drawLeveled(pools[k], counts[k], tier, recent).map((v) => ({ verb: v, group: Number(k) })));
 	}
 	// « aller » est LE piège (dès le CE2) : on le met souvent s'il y a de la place.
-	if (numItems >= 6 && !verbs.some((v) => v.verb === 'aller') && Math.random() < 0.6) {
+	// … mais moins souvent si l'élève vient de l'avoir.
+	const allerChance = recent && recent.has('aller') ? 0.2 : 0.6;
+	if (numItems >= 6 && !verbs.some((v) => v.verb === 'aller') && Math.random() < allerChance) {
 		const i = verbs.findIndex((v) => v.group === 3);
 		if (i >= 0) verbs[i] = { verb: 'aller', group: 3 };
 	}
@@ -464,7 +493,7 @@ function presentCategory(verb) {
 }
 
 /** Verbes + personnes imposés par le serveur pour chaque trou (selon le niveau). */
-function pickConjAssignments(rule, n, grade) {
+function pickConjAssignments(rule, n, grade, recent) {
 	const c = config(rule);
 	const tier = conj.levelTier(grade);
 	const persons = (weights) => {
@@ -492,7 +521,9 @@ function pickConjAssignments(rule, n, grade) {
 	if (c.pool === 'eter_eler') {
 		const pool = conj.POOLS.eter_eler;
 		const half = Math.ceil(n / 2);
-		const verbs = shuffle(drawLeveled(pool.double, half, tier).concat(drawLeveled(pool.grave, n - half, tier)));
+		const verbs = shuffle(
+			drawLeveled(pool.double, half, tier, recent).concat(drawLeveled(pool.grave, n - half, tier, recent))
+		);
 		// Surtout des personnes où le verbe change (e muet), quelques nous/vous en piège.
 		const ps = coveringPersons({ '1s': 2, '2s': 2, '3s': 3, '3p': 3, '1p': 1, '2p': 1 });
 		return verbs.map((verb, i) => ({ verb, person: ps[i], category: eterElerCategory(verb, ps[i]) }));
@@ -502,7 +533,7 @@ function pickConjAssignments(rule, n, grade) {
 	const pool = conj.POOLS[poolName];
 	const counts = spread(n, { 1: 4, 2: 2, 3: 4 });
 	let verbs = [];
-	for (const k of Object.keys(counts)) verbs = verbs.concat(drawLeveled(pool[k], counts[k], tier));
+	for (const k of Object.keys(counts)) verbs = verbs.concat(drawLeveled(pool[k], counts[k], tier, recent));
 	verbs = shuffle(verbs);
 
 	if (poolName === 'accord') {
@@ -670,7 +701,7 @@ function validateConj(out, assignments) {
 		// Élision oubliée devant une forme qui commence par une voyelle (« le {{3}} »
 		// pour « appellent ») : on répare (« l'{{3}} ») plutôt que de tout regénérer.
 		const unelided = text.slice(0, idx).match(/(^|[\s«"(])(je|me|te|se|le|la|ne)(\s+)$/i);
-		if (unelided && /^[aeiouyàâéèêëîïôû]/i.test(accepted[0])) {
+		if (unelided && conj.elidesBefore(accepted[0])) {
 			const start = idx - unelided[2].length - unelided[3].length;
 			text = text.slice(0, start) + unelided[2].slice(0, -1) + "'" + text.slice(idx);
 		}
@@ -699,13 +730,18 @@ function validateConj(out, assignments) {
  * (err.providerStatus si le provider LLM a répondu en erreur, err.invalid
  * si le LLM n'a pas produit d'exercice valide après les retries).
  */
-function generate(cfg, rule, req, logger) {
+/**
+ * ctx.recentVerbs (optionnel) : verbes des derniers exercices de l'élève,
+ * [[…le plus récent…], …] — tirés en dernier pour varier.
+ */
+function generate(cfg, rule, req, logger, ctx) {
+	const recent = recencyMap(ctx && ctx.recentVerbs);
 	const c = config(rule);
-	if (c.generator === 'verb_groups') return generateVerbGroups(req.num_blanks, req.grade_level);
+	if (c.generator === 'verb_groups') return generateVerbGroups(req.num_blanks, req.grade_level, recent);
 
 	const MAX_ATTEMPTS = 3;
 	let lastError = '';
-	const assignments = c.generator === 'conj_present' ? pickConjAssignments(rule, req.num_blanks, req.grade_level) : null;
+	const assignments = c.generator === 'conj_present' ? pickConjAssignments(rule, req.num_blanks, req.grade_level, recent) : null;
 
 	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 		try {
@@ -811,6 +847,8 @@ module.exports = {
 	generate,
 	grade,
 	shuffle,
+	recencyMap,
+	drawN,
 	// exportés pour les tests
 	classifyProche,
 	checkPronoun,
