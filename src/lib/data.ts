@@ -5,10 +5,11 @@ import type { RecordModel } from 'pocketbase';
  * (noms de champs historiques : rule_id, created_at, created_by_username…).
  */
 
-export type RuleType = 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation';
+export type RuleType = 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation' | 'transform';
 
 export interface RuleConfig {
-	generator?: 'verb_groups' | 'llm_qcm' | 'conj_present' | 'llm_span' | 'llm_punctuation';
+	generator?: 'verb_groups' | 'llm_qcm' | 'conj_present' | 'llm_span' | 'llm_punctuation' | 'llm_transform';
+	targets?: string[];
 	check?: string;
 	highlight?: boolean;
 	balance?: boolean;
@@ -42,6 +43,12 @@ export interface BlankRow {
 	tokens?: string[];
 	answer?: string;
 	kind?: string;
+	/** transform : phrase de départ, transformation, réponses acceptées, propositions du QCM. */
+	source?: string;
+	target?: string;
+	instruction?: string;
+	references?: string[];
+	options?: string[];
 }
 
 /** Données propres à un type d'exercice (ponctuation : mots affichés). */

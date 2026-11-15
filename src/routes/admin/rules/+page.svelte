@@ -5,14 +5,15 @@
 	import { normalizeWord, parseGroupsText, groupsToText, groupLabel } from '$lib/confusion';
 	import { activeUsername } from '$lib/active-username.svelte';
 
-	type RuleType = 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation';
+	type RuleType = 'multiple_choice' | 'free_text' | 'qcm' | 'span' | 'punctuation' | 'transform';
 
 	const TYPE_LABELS: Record<RuleType, string> = {
 		multiple_choice: 'texte à trous + menu',
 		free_text: 'texte à trous au clavier',
 		qcm: 'QCM',
 		span: 'mots à cliquer (GNS)',
-		punctuation: 'ponctuation à rétablir'
+		punctuation: 'ponctuation à rétablir',
+		transform: 'transformation de phrases'
 	};
 	/** Types qui utilisent une liste de candidats / réponses possibles. */
 	const WITH_CANDIDATES: RuleType[] = ['multiple_choice', 'qcm'];
@@ -21,7 +22,7 @@
 		grammaire: 'Grammaire',
 		conjugaison: 'Conjugaison'
 	};
-	const GENERATORS = ['verb_groups', 'llm_qcm', 'conj_present', 'llm_span', 'llm_punctuation'];
+	const GENERATORS = ['verb_groups', 'llm_qcm', 'conj_present', 'llm_span', 'llm_punctuation', 'llm_transform'];
 
 	interface RuleExample {
 		sentence: string;
@@ -461,7 +462,7 @@
 							+ <code>hard_consigne</code> : le mode difficile ne surligne plus le passage) ·
 							<code>conj_present</code> : verbes et
 							personnes choisis par le serveur, réponses calculées (<code>pool</code> :
-							<code>present</code> | <code>eter_eler</code> | <code>accord</code>) · <code>llm_span</code> : phrases avec le GNS entre [[ ]] (type « mots à cliquer ») · <code>llm_punctuation</code> : texte à ponctuer (type « ponctuation »).
+							<code>present</code> | <code>eter_eler</code> | <code>accord</code>) · <code>llm_span</code> : phrases avec le GNS entre [[ ]] (type « mots à cliquer ») · <code>llm_punctuation</code> : texte à ponctuer (type « ponctuation ») · <code>llm_transform</code> : phrases à transformer (<code>targets</code> : <code>negative</code>, <code>interrogative</code>, <code>exclamative</code>, <code>imperative</code>).
 						</span>
 					</label>
 				{/if}

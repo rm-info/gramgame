@@ -9,7 +9,24 @@
 	import { ruleGroups, groupLabel } from '$lib/confusion';
 
 	/** Ligne éditable : pour la saisie au clavier, les réponses acceptées en texte. */
-	type EditRow = BlankRow & { accepted_text?: string };
+	type EditRow = BlankRow & {
+		accepted_text?: string;
+		/** transform : une réponse / une proposition par ligne. */
+		references_text?: string;
+		options_text?: string;
+	};
+
+	const TARGET_OPTIONS: [string, string][] = [
+		['negative', 'forme négative'],
+		['interrogative', 'interrogative'],
+		['exclamative', 'exclamative'],
+		['imperative', 'impérative']
+	];
+	const lines = (t: string | undefined) =>
+		(t ?? '')
+			.split('\n')
+			.map((l) => l.trim())
+			.filter(Boolean);
 
 	interface ExerciseData {
 		id: string;
@@ -42,7 +59,7 @@
 
 	// Ponctuation : noms propres (gardent leur majuscule en début de phrase).
 	let properNounsText = $state('');
-	const isList = $derived(ruleType === 'qcm' || ruleType === 'span');
+	const isList = $derived(ruleType === 'qcm' || ruleType === 'span' || ruleType === 'transform');
 
 	const validation = $derived.by(() => {
 		if (ruleType === 'punctuation') {
@@ -53,6 +70,24 @@
 				blanksWithoutMarker: [] as number[],
 				incomplete: [] as number[],
 				ok: editText.trim().length > 0
+			};
+		}
+		if (ruleType === 'transform') {
+			const incomplete = editBlanks
+				.filter(
+					(b) =>
+						!(b.source ?? '').trim() ||
+						lines(b.references_text).length === 0 ||
+						lines(b.options_text).length !== 3
+				)
+				.map((b) => b.position);
+			return {
+				markerCount: 0,
+				blankCount: editBlanks.length,
+				markersWithoutBlank: [] as number[],
+				blanksWithoutMarker: [] as number[],
+				incomplete,
+				ok: editBlanks.length > 0 && incomplete.length === 0
 			};
 		}
 		if (ruleType === 'span') {
@@ -125,6 +160,13 @@
 					return { ...b, accepted_text: (b.accepted?.length ? b.accepted : [b.correct]).join(', ') };
 				}
 				if (type === 'qcm' || type === 'span') return { ...b };
+				if (type === 'transform') {
+					return {
+						...b,
+						references_text: (b.references ?? []).join('\n'),
+						options_text: (b.options ?? []).join('\n')
+					};
+				}
 				// L'ancien champ distractor est abandonné : les options viennent des groupes.
 				return { position: b.position, correct: b.correct };
 			})
@@ -157,6 +199,18 @@
 			const next = Math.max(0, ...editBlanks.map((b) => b.position)) + 1;
 			row = { position: next, prompt: '', correct: '', explanation: '', kind: 'simple' };
 		}
+		if (ruleType === 'transform') {
+			const next = Math.max(0, ...editBlanks.map((b) => b.position)) + 1;
+			row = {
+				position: next,
+				source: '',
+				target: rule?.config?.targets?.[0] ?? 'negative',
+				correct: '',
+				references_text: '',
+				options_text: '',
+				explanation: ''
+			};
+		}
 		editBlanks = [...editBlanks, row].sort((a, b) => a.position - b.position);
 	}
 
@@ -184,6 +238,21 @@
 				explanation: (b.explanation ?? '').trim(),
 				category: b.correct
 			}));
+		}
+		if (ruleType === 'transform') {
+			// Revalidé côté serveur (références correctes, 3 propositions, la bonne en 1er).
+			return editBlanks.map((b, i) => {
+				const options = lines(b.options_text);
+				return {
+					position: i + 1,
+					source: (b.source ?? '').trim(),
+					target: b.target,
+					references: lines(b.references_text),
+					options,
+					correct: options[0] ?? '',
+					explanation: (b.explanation ?? '').trim()
+				};
+			});
 		}
 		if (ruleType === 'span') {
 			// Mots, réponse attendue et catégorie recalculés par le serveur.
@@ -288,6 +357,15 @@
 					<code>!</code> ; un <code>!</code> accepte <code>.</code> sauf dans une phrase exclamative
 					(« Quel… », « Comme… »).
 				</p>
+				{:else if ruleType === 'transform'}
+				<label for="text">Consigne (non affichée : l'écran donne sa propre consigne selon le mode) :</label>
+				<textarea id="text" bind:value={editText} rows="2" class="consigne-input"></textarea>
+				<p class="muted small">
+					Pour chaque phrase : les <strong>réponses acceptées</strong> (une par ligne, toutes les
+					bonnes formulations) servent au QCM et guident la correction de l'IA en mode écriture ; les
+					<strong>3 propositions du QCM</strong> : la bonne en premier (elle doit être parmi les
+					réponses acceptées), puis deux erreurs typiques. L'ordre est mélangé à l'affichage.
+				</p>
 				{:else if ruleType === 'span'}
 				<label for="text">Consigne affichée à l'élève :</label>
 				<textarea id="text" bind:value={editText} rows="3" class="consigne-input"></textarea>
@@ -343,15 +421,51 @@
 			{#if ruleType !== 'punctuation'}
 			<div class="card stack editor-pane editor-pane-blanks">
 				<div class="row-between">
-					<h2>{isList ? (ruleType === 'span' ? 'Phrases' : 'Questions') : 'Trous'}</h2>
+					<h2>{isList ? (ruleType === 'qcm' ? 'Questions' : 'Phrases') : 'Trous'}</h2>
 					<button type="button" class="secondary" onclick={addBlank}>
-						+ Ajouter {isList ? (ruleType === 'span' ? 'une phrase' : 'une question') : 'un trou'}
+						+ Ajouter {isList ? (ruleType === 'qcm' ? 'une question' : 'une phrase') : 'un trou'}
 					</button>
 				</div>
 
 				<div class="blanks-scroll">
 					{#if editBlanks.length === 0}
 						<p class="muted">Rien pour l'instant. Ajoute-en avec le bouton ci-dessus.</p>
+					{:else if ruleType === 'transform'}
+						<ol class="qcm-edit">
+							{#each editBlanks as b (b.position)}
+								<li class="stack">
+									<div class="qcm-row">
+										<input type="text" bind:value={b.source} placeholder="Phrase de départ" />
+										<select bind:value={b.target} aria-label="Transformation">
+											{#each TARGET_OPTIONS as [value, label] (value)}
+												<option {value}>{label}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											class="link danger"
+											title="Supprimer cette phrase"
+											onclick={() => removeBlank(b.position)}
+										>
+											✕
+										</button>
+									</div>
+									<label class="small"
+										>Réponses acceptées (une par ligne)
+										<textarea rows="2" bind:value={b.references_text}></textarea>
+									</label>
+									<label class="small"
+										>Propositions du QCM : la bonne d'abord, puis 2 erreurs
+										<textarea rows="3" bind:value={b.options_text}></textarea>
+									</label>
+									<input
+										type="text"
+										bind:value={b.explanation}
+										placeholder="Explication (montrée après correction)"
+									/>
+								</li>
+							{/each}
+						</ol>
 					{:else if ruleType === 'span'}
 						<ol class="qcm-edit">
 							{#each editBlanks as b (b.position)}
