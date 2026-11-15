@@ -43,6 +43,24 @@ ok(validateQ(ruleP, [['Il [[va au]] marché.', 'futur proche']]), 'QCM proche fa
 const ruleN = { candidates: ['il', 'elle', 'ils', 'elles', 'nous', 'vous'], config: { check: 'pronom', highlight: true } };
 ok(validateQ(ruleN, [['[[Les chats]] dorment.', 'il']]), 'QCM pronom faux doit être refusé');
 ok(validateQ(ruleN, [['Les chats dorment.', 'ils']]), 'QCM sans [[ ]] doit être refusé');
+// Questions mélangées : le LLM les rend souvent groupées par réponse.
+{
+  const grouped = [];
+  for (const v of ['vient de partir', 'vient de manger', 'vient de lire', 'vient de finir']) grouped.push(['Il [[' + v + ']] tôt.', 'passé proche']);
+  for (const v of ['va partir', 'va manger', 'va lire', 'va finir']) grouped.push(['Elle [[' + v + ']] tard.', 'futur proche']);
+  for (const v of ['mange', 'lit', 'part', 'finit']) grouped.push(['Tom [[' + v + ']] vite.', 'présent']);
+  const items = grouped.map(([prompt, correct]) => ({ prompt, correct, explanation: '' }));
+  let shuffled = 0;
+  for (let k = 0; k < 20; k++) {
+    const v = ex.validateQcm({ items }, ruleP, items.length);
+    ok(!v.error, 'QCM groupé valide : ' + v.error);
+    ok(v.blanks.map((b) => b.position).join() === items.map((_, i) => i + 1).join(), 'positions 1..n');
+    ok(v.blanks.map((b) => b.prompt).sort().join() === items.map((x) => x.prompt).sort().join(), 'mêmes questions');
+    ok(v.blanks.every((b) => b.correct === items.find((x) => x.prompt === b.prompt).correct), 'réponse suit sa question');
+    if (v.blanks.map((b) => b.prompt).join() !== items.map((x) => x.prompt).join()) shuffled++;
+  }
+  ok(shuffled >= 18, 'questions mélangées (' + shuffled + '/20)');
+}
 function validateQ(rule, items) { return ex.validateQcm({ items: items.map(([prompt, correct]) => ({ prompt, correct, explanation: '' })) }, rule, items.length).error; }
 // verb groups: explanation for -oir
 const vg = ex.generateVerbGroups(30); ok(vg.blanks.length === 30, '30 verbes');

@@ -7,6 +7,7 @@
 
 const g = require(`${__hooks}/lib/gram.js`);
 const conj = require(`${__hooks}/lib/conjugaison.js`);
+const { shuffle } = require(`${__hooks}/lib/exercises.js`);
 
 // ────────────────────────────────────────────────────────────────────────────
 // GNS : phrase marquée « [[Le chien des voisins]] aboie. » → mots + réponse
@@ -174,7 +175,9 @@ function validateSpan(out, n) {
 		seen.add(key);
 		blanks.push(item);
 	}
-	return { blanks };
+	// Le LLM enchaîne souvent les types de sujets dans l'ordre de la consigne
+	// (simple, long, éloigné…) : on mélange les phrases.
+	return { blanks: shuffle(blanks).map((b, i) => Object.assign(b, { position: i + 1 })) };
 }
 
 function gradeSpan(exercise, responses) {

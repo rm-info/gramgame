@@ -65,5 +65,20 @@ ok(!sp.validatePunctuation({ text: 'Il pleut. Le chat dort ! Tom rit. Où est L�
 const vs = sp.validateSpan({ items: [{ prompt: '[[Le chat]] dort.', kind: 'simple', explanation: 'x' }, { prompt: '[[Le chat]] dort.', kind: 'simple', explanation: 'x' }] }, 2);
 ok(vs.error, 'doublon refusé');
 
+// Phrases mélangées (le LLM les rend souvent dans l'ordre des catégories).
+{
+  const kinds = ['simple', 'long', 'eloigne', 'compose', 'inverse'];
+  const its = Array.from({ length: 10 }, (_, i) => ({ prompt: `[[Le chat ${i}]] dort ${i}.`, kind: kinds[i % 5], explanation: 'e' + i }));
+  let shuffled = 0;
+  for (let k = 0; k < 20; k++) {
+    const v = sp.validateSpan({ items: its }, 10);
+    ok(!v.error, 'span valide : ' + v.error);
+    ok(v.blanks.map((b) => b.position).join() === its.map((_, i) => i + 1).join(), 'span positions 1..n');
+    ok(v.blanks.every((b) => b.explanation === 'e' + b.prompt.match(/\d+/)[0]), 'explication suit sa phrase');
+    if (v.blanks.map((b) => b.prompt).join() !== its.map((x) => x.prompt).join()) shuffled++;
+  }
+  ok(shuffled >= 18, 'phrases mélangées (' + shuffled + '/20)');
+}
+
 console.log(fail ? `${fail} échec(s)` : 'tout OK');
 if (fail) process.exit(1);
