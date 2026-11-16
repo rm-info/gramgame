@@ -41,7 +41,24 @@
 		}
 	});
 
+	// Menu hamburger (petits écrans) : fermé à chaque changement de page.
+	let menuOpen = $state(false);
+	$effect(() => {
+		void page.url.pathname;
+		menuOpen = false;
+	});
+	function onWindowClick(e: MouseEvent) {
+		// composedPath : chemin au moment du clic (l'icône ☰/✕ est remplacée entre-temps).
+		if (menuOpen && !e.composedPath().some((el) => el instanceof HTMLElement && el.classList.contains('topbar'))) {
+			menuOpen = false;
+		}
+	}
+	function onWindowKey(e: KeyboardEvent) {
+		if (menuOpen && e.key === 'Escape') menuOpen = false;
+	}
+
 	async function handleSignOut() {
+		menuOpen = false;
 		await auth.signOut();
 		if (auth.user) {
 			await invalidateAll();
@@ -76,11 +93,29 @@
 	<title>GramGame</title>
 </svelte:head>
 
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
+
 <header class="topbar">
 	<div class="container topbar-inner">
 		<a href={`${base}/`} class="brand">GramGame</a>
 		{#if auth.user && activeUsername.username}
-			<nav class="nav">
+			<button
+				type="button"
+				class="secondary menu-toggle"
+				aria-expanded={menuOpen}
+				aria-controls="main-nav"
+				aria-label={menuOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
+				onclick={() => (menuOpen = !menuOpen)}
+			>
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+					{#if menuOpen}
+						<line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+					{:else}
+						<line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" />
+					{/if}
+				</svg>
+			</button>
+			<nav class="nav" id="main-nav" class:open={menuOpen}>
 				{#if activeUsername.availableNames.length > 1}
 					<label class="switcher">
 						<span class="muted">Compte :</span>
@@ -96,7 +131,9 @@
 					</label>
 					<a href={`${base}/profile`} class="profile-link">Profil</a>
 				{:else}
-					<a href={`${base}/profile`} class="profile-link">{activeUsername.username}</a>
+					<a href={`${base}/profile`} class="profile-link"
+						>{activeUsername.username}<span class="menu-only muted">&nbsp;· mon profil</span></a
+					>
 				{/if}
 				<a href={`${base}/evaluations`} class="admin-link">Évaluations</a>
 				{#if activeUsername.isSupervisor}
@@ -127,6 +164,7 @@
 						<polyline points="16 17 21 12 16 7" />
 						<line x1="21" y1="12" x2="9" y2="12" />
 					</svg>
+					<span class="logout-label">Déconnexion</span>
 				</button>
 			</nav>
 		{/if}
@@ -172,20 +210,80 @@
 		padding: 6px;
 		line-height: 0;
 	}
-	@media (max-width: 600px) {
-		/* Beaucoup de liens (prof, admin) : la barre passe sur deux lignes au lieu de déborder. */
-		.topbar-inner {
-			flex-wrap: wrap;
-			gap: var(--space-2);
+	.menu-toggle,
+	.logout-label,
+	.menu-only {
+		display: none;
+	}
+	/* Petits écrans : menu hamburger, les liens s'ouvrent dans un panneau sous la barre. */
+	@media (max-width: 640px) {
+		.topbar {
+			position: relative;
+			z-index: 50;
+		}
+		.menu-toggle svg {
+			pointer-events: none;
+		}
+		.menu-toggle {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: auto;
+			padding: 6px;
+			line-height: 0;
 		}
 		.nav {
-			flex-wrap: wrap;
-			justify-content: flex-end;
-			margin-left: auto;
-			gap: var(--space-2);
+			display: none;
+			position: absolute;
+			top: 100%;
+			left: 0;
+			right: 0;
+			flex-direction: column;
+			align-items: stretch;
+			gap: 0;
+			padding: var(--space-2) var(--space-4) var(--space-3);
+			background: var(--color-surface);
+			border-bottom: 1px solid var(--color-border);
+			box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
 		}
-		.admin-link {
-			padding: 4px 8px;
+		.nav.open {
+			display: flex;
+		}
+		.nav > a,
+		.nav > .switcher,
+		.nav > .logout {
+			padding: 12px 4px;
+			border: none;
+			border-bottom: 1px solid var(--color-border);
+			border-radius: 0;
+			font-size: 1rem;
+			line-height: 1.3;
+			color: var(--color-text);
+			background: transparent;
+		}
+		.nav > a:hover,
+		.nav > .logout:hover:not(:disabled) {
+			background: rgba(47, 93, 177, 0.06);
+			color: var(--color-primary);
+		}
+		.nav > .logout {
+			justify-content: flex-start;
+			gap: var(--space-2);
+			width: 100%;
+			border-bottom: none;
+			color: var(--color-error);
+		}
+		.logout-label,
+		.menu-only {
+			display: inline;
+		}
+		.menu-toggle,
+		.menu-toggle:hover:not(:disabled) {
+			background: var(--color-surface);
+			color: var(--color-primary);
+		}
+		.switcher {
+			justify-content: space-between;
 		}
 	}
 	.switcher {
