@@ -97,4 +97,33 @@ const qs = ev.questionStats(
 );
 assert.deepStrictEqual(qs.map((q) => [q.exercise, q.position, q.ok, q.total]), [['B', 2, 0, 1], ['A', 1, 1, 2]]);
 
+// ── V2 : réponses données, durée, correction manuelle
+assert.deepStrictEqual(ev.answeredCount('qcm', [{ position: 1 }, { position: 2 }, { position: 3 }], { 1: 'il', 2: ' ', 3: '' }), { answered: 1, total: 3 });
+assert.deepStrictEqual(ev.answeredCount('punctuation', [{ position: 3 }, { position: 7 }], { 3: ',', 5: '.', 7: '' }), { answered: 1, total: 2 }, 'ponctuation : signe mis là où un signe était attendu');
+assert.deepStrictEqual(ev.answeredCount('span', [{ position: 1 }], undefined), { answered: 0, total: 1 });
+assert.strictEqual(ev.durationSeconds('2026-11-15 10:00:00.000Z', '2026-11-15 10:12:30.000Z'), 750);
+assert.strictEqual(ev.durationSeconds('2026-11-15 10:00:00.000Z', ''), null);
+
+const results = [
+	{ exercise: 'A', points: 10, earned: 5, score: 1, score_total: 2, per_blank: [{ position: 1, ok: true }, { position: 2, ok: false, judged_by: 'ia', uncertain: true }] },
+	{ exercise: 'B', points: 10, earned: 10, score: 1, score_total: 1, per_blank: [{ position: 4, ok: true }] }
+];
+let o = ev.applyOverride(results, 'A', 2, true);
+assert.strictEqual(o.results[0].score, 2);
+assert.strictEqual(o.results[0].earned, 10);
+assert.strictEqual(o.note20, 20);
+const b2 = o.results[0].per_blank[1];
+assert.ok(b2.ok && b2.overridden && b2.ok_auto === false && b2.judged_by === 'prof' && b2.judged_by_auto === 'ia');
+o = ev.applyOverride(o.results, 'A', 2, false);
+assert.strictEqual(o.results[0].per_blank[1].ok_auto, false, 'la correction automatique est gardée d’un changement à l’autre');
+assert.strictEqual(o.note20, 15);
+o = ev.applyOverride(o.results, 'A', 2, null);
+const back = o.results[0].per_blank[1];
+assert.ok(!back.ok && !back.overridden && !('ok_auto' in back) && back.judged_by === 'ia', 'retour à la correction automatique');
+o = ev.applyOverride(o.results, 'B', 4, false);
+assert.strictEqual(o.results[1].earned, 0);
+assert.strictEqual(o.score_points, 5);
+assert.strictEqual(ev.applyOverride(results, 'A', 99, true), null, 'question inconnue');
+assert.strictEqual(results[0].per_blank[1].ok, false, 'les résultats d’origine ne sont pas modifiés');
+
 console.log('évaluations : OK');

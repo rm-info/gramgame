@@ -157,7 +157,30 @@ export interface ResultsStudent {
 	score_points?: number;
 	total_points?: number;
 	parts?: { exercise: string; earned: number; points: number; score: number; score_total: number }[];
+	/** Durée (copie rendue), en secondes. */
+	duration_s?: number | null;
+	/** Réponses données, justes ou fausses. */
+	answered?: number;
+	answered_total?: number;
+	answered_pct?: number;
+	/** Sorties de la page pendant l'épreuve. */
+	leaves?: number;
+	away_seconds?: number;
+	/** Hors de la page en ce moment. */
+	away_now?: boolean;
+	/** Questions corrigées à la main. */
+	overrides?: number;
 }
+
+/** Copie vue par l'auteur. */
+export type AuthorCopy = CorrectedCopy & {
+	id: string;
+	student_username: string;
+	title: string;
+	started_at: string;
+	leaves: number;
+	away_seconds: number;
+};
 
 export interface QuestionStat {
 	exercise: string;
@@ -222,8 +245,11 @@ export const evalsApi = {
 	authorList: () => gramRequest<{ evaluations: AuthorEvalRow[] }>('GET', 'evals'),
 	mine: () => gramRequest<{ evaluations: MyEval[] }>('GET', 'evals/mine'),
 	results: (id: string) => gramRequest<EvalResults>('GET', `evals/${id}/results`),
-	copy: (id: string, sub: string) =>
-		gramRequest<CorrectedCopy & { student_username: string; title: string }>('GET', `evals/${id}/copies/${sub}`),
+	copy: (id: string, sub: string) => gramRequest<AuthorCopy>('GET', `evals/${id}/copies/${sub}`),
+	override: (id: string, sub: string, exercise: string, position: number, ok: boolean | null) =>
+		gramRequest<AuthorCopy>('POST', `evals/${id}/copies/${sub}/override`, { exercise, position, ok }),
+	duplicate: (id: string) => gramRequest<{ id: string }>('POST', `evals/${id}/duplicate`, {}),
+	leave: (id: string, back: boolean) => gramRequest<{ ok: boolean }>('POST', `evals/${id}/leave`, { back }),
 	addPart: (id: string, body: Record<string, unknown>) =>
 		gramRequest<{ part: PartSummary }>('POST', `evals/${id}/parts`, body),
 	regenerate: (id: string, ex: string) => gramRequest<{ part: PartSummary }>('POST', `evals/${id}/parts/${ex}/regenerate`, {}),
@@ -245,6 +271,17 @@ export function formatDateTime(iso: string | null | undefined): string {
 	const d = new Date(iso.replace(' ', 'T'));
 	if (isNaN(d.getTime())) return '';
 	return d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+/** 754 → « 12 min 34 s » ; 40 → « 40 s ». */
+export function fmtDuration(sec: number | null | undefined): string {
+	if (sec === null || sec === undefined) return '—';
+	const h = Math.floor(sec / 3600);
+	const m = Math.floor((sec % 3600) / 60);
+	const s = sec % 60;
+	if (h) return `${h} h ${String(m).padStart(2, '0')}`;
+	if (m) return `${m} min ${String(s).padStart(2, '0')} s`;
+	return `${s} s`;
 }
 
 export const fmtNote = (n: number | null | undefined) =>

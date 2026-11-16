@@ -21,8 +21,13 @@ export interface PerBlank {
 	extra?: boolean;
 	/** transform (écriture) : retour pour l'élève, qui l'a jugé, doute éventuel. */
 	feedback?: string;
-	judged_by?: 'rules' | 'ia' | 'none';
+	judged_by?: 'rules' | 'ia' | 'none' | 'prof';
+	/** Évaluation : correction changée à la main par l'auteur (ok_auto = correction automatique). */
+	overridden?: boolean;
+	ok_auto?: boolean;
 	uncertain?: boolean;
+	/** Repère de la question (phrase, verbe, mot…), quand le correcteur en donne un. */
+	context?: string;
 }
 
 export interface CorrectionResult {

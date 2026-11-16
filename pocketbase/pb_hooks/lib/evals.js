@@ -218,6 +218,79 @@ function questionStats(parts, resultsList) {
 		.sort((a, b) => (order[a.exercise] ?? 0) - (order[b.exercise] ?? 0) || a.position - b.position);
 }
 
+const PUNCT_MARKS = ['.', ',', '?', '!'];
+
+/**
+ * Réponses données (justes ou fausses) sur une partie.
+ * Ponctuation : signes attendus à un endroit où l'élève a mis un signe.
+ */
+function answeredCount(ruleType, blanks, resp) {
+	const list = Array.isArray(blanks) ? blanks : [];
+	const r = resp && typeof resp === 'object' ? resp : {};
+	let answered = 0;
+	for (const b of list) {
+		const v = String(r[String(b.position)] ?? '').trim();
+		if (ruleType === 'punctuation' ? PUNCT_MARKS.indexOf(v) >= 0 : v !== '') answered++;
+	}
+	return { answered, total: list.length };
+}
+
+/** Durée en secondes entre deux dates (null si l'une manque). */
+function durationSeconds(startIso, endIso) {
+	const a = ms(startIso);
+	const b = ms(endIso);
+	return a === null || b === null ? null : Math.max(0, Math.round((b - a) / 1000));
+}
+
+/** Recalcule les points d'une copie à partir des réponses jugées (per_blank[].ok). */
+function recompute(results) {
+	let earned = 0;
+	let total = 0;
+	const out = (results || []).map((r) => {
+		const per = r.per_blank || [];
+		const score = per.filter((b) => b.ok).length;
+		const scoreTotal = per.length || r.score_total || 1;
+		const got = earnedPoints(score, scoreTotal, r.points);
+		earned += got;
+		total += r.points;
+		return Object.assign({}, r, { score, score_total: scoreTotal, earned: got });
+	});
+	return { results: out, score_points: round2(earned), total_points: total, note20: noteOn20(earned, total) };
+}
+
+/**
+ * Correction manuelle d'une question par l'auteur : ok = true / false, ou null
+ * pour revenir à la correction automatique. Renvoie null si la question n'existe pas.
+ */
+function applyOverride(results, exerciseId, position, ok) {
+	let found = false;
+	const next = (results || []).map((r) => {
+		if (r.exercise !== exerciseId) return r;
+		const per = (r.per_blank || []).map((b) => {
+			if (Number(b.position) !== Number(position)) return b;
+			found = true;
+			const auto = b.overridden ? !!b.ok_auto : !!b.ok;
+			const nb = Object.assign({}, b);
+			if (ok === null) {
+				nb.ok = auto;
+				delete nb.overridden;
+				delete nb.ok_auto;
+				if (nb.judged_by === 'prof') nb.judged_by = nb.judged_by_auto || undefined;
+				delete nb.judged_by_auto;
+			} else {
+				nb.ok = !!ok;
+				nb.ok_auto = auto;
+				nb.overridden = true;
+				if (nb.judged_by !== 'prof') nb.judged_by_auto = nb.judged_by;
+				nb.judged_by = 'prof';
+			}
+			return nb;
+		});
+		return Object.assign({}, r, { per_blank: per });
+	});
+	return found ? recompute(next) : null;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Fonctions qui touchent la base
 // ────────────────────────────────────────────────────────────────────────────
@@ -588,8 +661,92 @@ function studentView(app, ev, sub, now) {
 	return view;
 }
 
+/** Parties chargées une fois (pour compter les réponses de toute une classe). */
+function loadPartInfos(app, ev) {
+	const out = [];
+	for (const p of ev.parts) {
+		try {
+			const info = partInfo(app, p);
+			out.push({ exercise: p.exercise, ruleType: info.rule.rule_type, blanks: jsonField(info.exercise, 'blanks') || [] });
+		} catch (_) {}
+	}
+	return out;
+}
+
+/** Réponses données sur toute la copie : { answered, total, pct }. */
+function answeredStats(infos, responses) {
+	let answered = 0;
+	let total = 0;
+	for (const info of infos) {
+		const c = answeredCount(info.ruleType, info.blanks, (responses || {})[info.exercise]);
+		answered += c.answered;
+		total += c.total;
+	}
+	return { answered, total, pct: total ? Math.round((answered / total) * 100) : 0 };
+}
+
+/** Retour de l'élève sur la page : temps passé ailleurs ajouté. */
+function markBack(app, sub, now) {
+	const left = ms(sub.getString('left_at'));
+	if (left === null) return;
+	const away = Math.max(0, Math.min(now - left, 6 * 3600 * 1000));
+	sub.set('away_seconds', sub.getInt('away_seconds') + Math.round(away / 1000));
+	sub.set('left_at', '');
+	app.save(sub);
+}
+
+/**
+ * Copie d'une évaluation (pour une autre classe) : mêmes parties (exercices
+ * recopiés), même barème et mêmes réglages ; sans élèves, sans dates, en préparation.
+ */
+function duplicate(app, auth, ev) {
+	const rec = new Record(app.findCollectionByNameOrId('evaluations'));
+	const title = `${ev.title} (copie)`.slice(0, 100);
+	rec.set('title', title);
+	rec.set('author', auth.id);
+	rec.set('author_username', auth.getString('username'));
+	rec.set('grade_level', ev.grade_level);
+	rec.set('status', 'draft');
+	rec.set('parts', []);
+	rec.set('time_limit_min', ev.time_limit_min);
+	rec.set('correction_mode', ev.correction_mode === 'after_close' ? 'manual' : ev.correction_mode);
+	rec.set('correction_released', false);
+	app.save(rec);
+	const parts = [];
+	for (const p of ev.parts) {
+		let src;
+		try {
+			src = app.findRecordById('exercises', p.exercise);
+		} catch (_) {
+			continue;
+		}
+		const ex = new Record(app.findCollectionByNameOrId('exercises'));
+		for (const f of ['rule', 'theme', 'grade_level', 'num_blanks', 'text', 'llm_model']) ex.set(f, src.get(f));
+		ex.set('blanks', jsonField(src, 'blanks') || []);
+		const extra = jsonField(src, 'extra');
+		if (extra) ex.set('extra', extra);
+		ex.set('owner', auth.id);
+		ex.set('owner_username', auth.getString('username'));
+		ex.set('evaluation', rec.id);
+		ex.set('verified', false);
+		app.save(ex);
+		parts.push(Object.assign({}, p, { exercise: ex.id }));
+	}
+	rec.set('parts', parts);
+	app.save(rec);
+	return rec;
+}
+
 module.exports = {
 	MAX_PARTS,
+	answeredCount,
+	durationSeconds,
+	recompute,
+	applyOverride,
+	loadPartInfos,
+	answeredStats,
+	markBack,
+	duplicate,
 	GRACE_MS,
 	seededRng,
 	shuffled,

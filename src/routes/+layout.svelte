@@ -172,9 +172,20 @@
 		padding: 6px;
 		line-height: 0;
 	}
-	@media (max-width: 480px) {
-		.nav {
+	@media (max-width: 600px) {
+		/* Beaucoup de liens (prof, admin) : la barre passe sur deux lignes au lieu de déborder. */
+		.topbar-inner {
+			flex-wrap: wrap;
 			gap: var(--space-2);
+		}
+		.nav {
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			margin-left: auto;
+			gap: var(--space-2);
+		}
+		.admin-link {
+			padding: 4px 8px;
 		}
 	}
 	.switcher {
