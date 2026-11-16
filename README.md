@@ -195,6 +195,24 @@ Résultats pour l'auteur : copies rendues, moyenne, note /20 et points par parti
 
 Fichiers : `pb_migrations/1795300000_evaluations.js` et `1795500000_evaluations_v2.js`, `pb_hooks/lib/evals.js` (sujet sans réponses, délais, notes), `lib/generation.js` et `lib/grading.js` (génération et correction partagées avec l'entraînement), `src/routes/evaluations/`.
 
+### Rappels par notification (PWA)
+
+GramGame s'installe comme une application (manifest, icônes, service worker `src/service-worker.ts`, sans cache hors ligne). Un élève peut activer **« Me rappeler mes évaluations »** (page Évaluations, ou Profil → Rappels). Il reçoit alors une notification **chaque jour à 17 h 30** (heure de l'appareil) tant qu'il a une évaluation à faire.
+
+Les rappels passent par le serveur [PUSH](https://push.lab.rm-info.fr/llms.txt), qui ne voit qu'un identifiant au hasard et un horaire, jamais de nom ni de texte. C'est donc **l'appareil** qui programme son rappel :
+- À chaque ouverture de l'app (et après « Commencer » ou « Rendre ma copie »), il calcule les évaluations à faire : ouvertes ou à venir, pas rendues, sans épreuve chronométrée déjà commencée, rappels non coupés par l'auteur.
+- Il programme **un** rappel quotidien qui commence à l'ouverture et s'arrête au dernier jour avant la date de fin. Il le supprime quand il n'y a plus rien à faire.
+- À l'heure du rappel, le service worker relit la liste à jour sur GramGame, avec la session du compte gardée en local (IndexedDB), pour écrire le texte : « « Contrôle période 1 » t'attend », « Dernier jour pour… ». Si tout a été rendu entre-temps, ailleurs, il le dit une dernière fois et arrête le rappel.
+- Le code est dans `src/lib/push/` (`logic.ts` pour quand programmer et quoi afficher, `reminders.svelte.ts`, `idb.ts`, et `push-client.js`, recopié du serveur PUSH).
+
+Limites :
+- L'élève doit avoir ouvert l'app au moins une fois depuis la publication de l'évaluation pour que le rappel soit programmé. Le mail de publication couvre le premier jour.
+- Sur iPhone et iPad (iOS 16.4 ou plus récent), il faut d'abord installer l'app sur l'écran d'accueil (Partager → Sur l'écran d'accueil). L'app l'explique.
+- La livraison n'est pas garantie par Apple, Google ou Mozilla.
+- L'auteur peut couper les rappels d'une évaluation (Réglages → « Rappel quotidien par notification »).
+
+Mise en route : demander une clé d'application sur `https://push.lab.rm-info.fr/request-key`, avec l'origine exacte de l'app (par ex. `https://gramgame.lab.rm-info.fr`), puis mettre `PUSH_APP_KEY=app_…` dans `pocketbase/.env` et redémarrer. La clé est un identifiant public, pas un secret. **Garder le jeton de demande (`req_…`) hors du dépôt**. Sans clé, l'option n'apparaît pas.
+
 ## Ajouter une règle de grammaire
 
 Depuis l'app : **Gestion → Règles** (admin). Ou depuis l'admin PocketBase `/_/` → collection `rules`.

@@ -119,6 +119,8 @@ export interface MyEval {
 	submitted_at: string | null;
 	correction_visible: boolean;
 	note20: number | null;
+	/** Rappels quotidiens par notification (false : coupés par l'auteur). */
+	reminders: boolean;
 }
 
 export interface AuthorEvalRow {
@@ -227,6 +229,7 @@ export interface EvalResults {
 		time_limit_min: number;
 		correction_mode: CorrectionMode;
 		correction_released: boolean;
+		no_reminders: boolean;
 		correction_visible: boolean;
 		started: number;
 		mails: MailSummary;

@@ -8,6 +8,7 @@
 	import { auth } from '$lib/auth.svelte';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { profileState } from '$lib/profile.svelte';
+	import { pushReminders } from '$lib/push/reminders.svelte';
 
 	let { children } = $props();
 
@@ -57,8 +58,17 @@
 		if (menuOpen && e.key === 'Escape') menuOpen = false;
 	}
 
+	// Rappels d'évaluations (élève) : abonnement vérifié et rappel mis à jour à chaque ouverture.
+	$effect(() => {
+		const u = auth.user;
+		if (!u || auth.loading || !activeUsername.isStudent) return;
+		void pushReminders.init(u.id, u.username);
+	});
+
 	async function handleSignOut() {
 		menuOpen = false;
+		// Plus de rappels pour ce compte sur cet appareil.
+		if (auth.user) await pushReminders.forget(auth.user.id);
 		await auth.signOut();
 		if (auth.user) {
 			await invalidateAll();

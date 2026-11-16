@@ -104,6 +104,19 @@ routerUse((e) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// Rappels par notification (PWA) : adresse du serveur PUSH et clé d'application.
+// La clé est un identifiant public (elle finit dans le navigateur) ; sans clé,
+// l'app n'affiche pas l'option. Le serveur PUSH ne voit qu'un identifiant
+// opaque et un horaire : le texte du rappel reste sur l'appareil.
+// ────────────────────────────────────────────────────────────────────────────
+routerAdd('GET', '/api/gram/push-config', (e) => {
+	const key = String($os.getenv('PUSH_APP_KEY') || '').trim();
+	const url = String($os.getenv('PUSH_BASE_URL') || 'https://push.lab.rm-info.fr').trim().replace(/\/$/, '');
+	if (!key) return e.json(200, { enabled: false });
+	return e.json(200, { enabled: true, base_url: url, app_key: key });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // Inscription
 // ────────────────────────────────────────────────────────────────────────────
 routerAdd('POST', '/api/gram/register', (e) => {
@@ -1257,7 +1270,9 @@ routerAdd(
 				status: submitted ? 'submitted' : sub ? 'in_progress' : state === 'closed' ? 'missed' : 'todo',
 				submitted_at: submitted || null,
 				correction_visible: !!submitted && visible,
-				note20: submitted && visible ? sub.getFloat('note20') : null
+				note20: submitted && visible ? sub.getFloat('note20') : null,
+				// Rappels quotidiens par notification (coupés par l'auteur si false).
+				reminders: !data.no_reminders
 			};
 		});
 		return e.json(200, { evaluations: out });
