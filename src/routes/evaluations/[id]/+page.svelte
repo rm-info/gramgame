@@ -410,6 +410,16 @@
 		busy = false;
 	}
 
+	/** « 16/11/2026 21:33 » : reconnu comme date par les tableurs français. */
+	function csvDate(iso: string | null | undefined): string {
+		if (!iso) return '';
+		const d = new Date(iso.replace(' ', 'T'));
+		if (isNaN(d.getTime())) return '';
+		return d
+			.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+			.replace(',', '');
+	}
+
 	/** Tableau des résultats en CSV (point-virgule, virgule décimale : s'ouvre tel quel dans un tableur français). */
 	function exportCsv() {
 		if (!data || !ev) return;
@@ -436,8 +446,8 @@
 			st.username,
 			st.classes.join(', '),
 			STATUS_LABEL[st.status] + (st.auto_submitted ? ' (temps écoulé)' : ''),
-			st.started_at ? formatDateTime(st.started_at) : '',
-			st.submitted_at ? formatDateTime(st.submitted_at) : '',
+			csvDate(st.started_at),
+			csvDate(st.submitted_at),
 			st.duration_s === null || st.duration_s === undefined ? '' : num(st.duration_s / 60),
 			st.answered_pct === undefined ? '' : String(st.answered_pct),
 			st.leaves === undefined ? '' : String(st.leaves),
@@ -572,7 +582,7 @@
 							{#each data.students as s (s.id)}
 								<tr class:open={copyOf === s.submission_id}>
 									<td>
-										<strong>{s.username}</strong>
+										<strong class="nowrap">{s.username}</strong>
 										{#if s.classes.length}<span class="muted small hide-sm"> · {s.classes.join(', ')}</span>{/if}
 									</td>
 									<td class="small hide-sm">
@@ -1047,6 +1057,10 @@
 		.part-col {
 			display: none;
 		}
+	}
+	/* Nom d'élève jamais coupé (au tiret notamment) ; le tableau défile s'il le faut. */
+	.nowrap {
+		white-space: nowrap;
 	}
 	.warn {
 		color: var(--color-warning);
