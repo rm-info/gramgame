@@ -15,7 +15,8 @@
 		type CorrectionMode,
 		type EvalResults,
 		type CorrectedCopy,
-		type PartSummary
+		type PartSummary,
+		type PublishMails
 	} from '$lib/api/evals';
 
 	interface RuleOption {
@@ -67,6 +68,10 @@
 	let partEdits = $state<Record<string, { points: number; hard: boolean }>>({});
 
 	let busy = $state(false);
+	/** Publication en cours (spinner sur le bouton). */
+	let publishing = $state(false);
+	/** Mails en cours d'envoi, après la publication. */
+	let mailing = $state(false);
 	let msg = $state<string | null>(null);
 	let error = $state<string | null>(null);
 
@@ -231,15 +236,58 @@
 			await reload();
 		}, 'Enregistré.');
 
-	const publish = (on: boolean) =>
-		run(
+	const publish = (on: boolean) => {
+		publishing = on;
+		return run(
 			async () => {
-				if (on) await pb.collection('evaluations').update(id, settingsPayload());
-				await evalsApi.publish(id, on);
+				try {
+					if (on) await pb.collection('evaluations').update(id, settingsPayload());
+					await evalsApi.publish(id, on);
+				} finally {
+					publishing = false;
+				}
 				await reload();
+				if (on) {
+					msg = publishedMessage(null);
+					void sendMails();
+				}
 			},
-			on ? 'Publiée : les élèves la voient dans « Évaluations ».' : 'Repassée en préparation.'
+			on ? undefined : 'Repassée en préparation.'
 		);
+	};
+
+	/** Envoi des mails après la publication, sans bloquer la page. */
+	async function sendMails() {
+		mailing = true;
+		let m: PublishMails;
+		try {
+			m = await evalsApi.sendMails(id);
+		} catch {
+			m = { sent: 0, failed: -1 };
+		}
+		mailing = false;
+		await reload();
+		if (msg?.startsWith('Publiée')) msg = publishedMessage(m);
+	}
+
+	/** Message après publication, avec le bilan des mails envoyés tout de suite. */
+	function publishedMessage(m: PublishMails | null): string {
+		let out = 'Publiée : les élèves la voient dans « Évaluations ».';
+		const day = data?.evaluation.mails.scheduled_day;
+		if (m && m.failed < 0) out += " Les mails n'ont pas pu partir : nouvel essai cette nuit à minuit.";
+		else {
+			if (m?.sent) out += ` Mail envoyé à ${plural(m.sent, 'élève')}.`;
+			if (m?.failed) out += ` ${plural(m.failed, 'mail')} non envoyé${m.failed > 1 ? 's' : ''} : nouvel essai cette nuit à minuit.`;
+			if (!m?.sent && !m?.failed && day) out += ` Les élèves seront prévenus par mail le ${fmtDay(day)}, à minuit.`;
+		}
+		return out;
+	}
+
+	const plural = (n: number, w: string) => `${n} ${w}${n > 1 ? 's' : ''}`;
+
+	/** '2026-11-20' → « vendredi 20 novembre ». */
+	const fmtDay = (day: string) =>
+		new Date(`${day}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
 	const release = () => {
 		if (!confirm('Donner la correction et la note à tous les élèves qui ont rendu leur copie ?')) return;
@@ -359,7 +407,9 @@
 			</div>
 			<div class="head-actions">
 				{#if !published}
-					<button type="button" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>Publier</button>
+					<button type="button" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>
+						{#if publishing}<span class="spinner" aria-hidden="true"></span> Publication…{:else}Publier{/if}
+					</button>
 				{:else if !started}
 					<button type="button" class="secondary" disabled={busy} onclick={() => publish(false)}>Repasser en préparation</button>
 				{/if}
@@ -391,6 +441,19 @@
 						{ev.correction_visible
 							? 'Les élèves voient leur note et la correction.'
 							: `Les élèves verront leur note et la correction ${CORRECTION_LABELS[ev.correction_mode]}${ev.closes_at ? ` (${formatDateTime(ev.closes_at)})` : ''}.`}
+					</p>
+				{/if}
+
+				{#if ev.mails.scheduled_day}
+					<p class="muted small">📧 Les élèves seront prévenus par mail le {fmtDay(ev.mails.scheduled_day)}, à minuit.</p>
+				{:else if mailing || ev.mails.sending}
+					<p class="muted small" role="status"><span class="spinner" aria-hidden="true"></span> 📧 Envoi des mails en cours…</p>
+				{:else if ev.mails.targets}
+					{@const retry = ev.mails.failed - ev.mails.gave_up}
+					<p class="muted small">
+						📧 Mail envoyé à {ev.mails.sent} élève{ev.mails.sent > 1 ? 's' : ''} sur {ev.mails.targets}{retry
+							? ` · ${retry} en attente (nouvel essai cette nuit à minuit)`
+							: ''}{ev.mails.gave_up ? ` · ${ev.mails.gave_up} non envoyé${ev.mails.gave_up > 1 ? 's' : ''} après 3 essais` : ''}.
 					</p>
 				{/if}
 
@@ -673,10 +736,18 @@
 					</label>
 				{/each}
 			</fieldset>
+			{#if !published}
+				<p class="muted small">
+					📧 À la publication, chaque élève reçoit un mail. Si l'évaluation ouvre un autre jour, le mail part ce
+					jour-là, à minuit.
+				</p>
+			{/if}
 			<div class="save-row">
 				<button type="button" disabled={busy || !editTitle.trim()} onclick={save}>Enregistrer</button>
 				{#if !published}
-					<button type="button" class="secondary" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>Enregistrer et publier</button>
+					<button type="button" class="secondary" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>
+						{#if publishing}<span class="spinner" aria-hidden="true"></span> Publication…{:else}Enregistrer et publier{/if}
+					</button>
 				{/if}
 			</div>
 		</div>
@@ -684,6 +755,26 @@
 </section>
 
 <style>
+	.spinner {
+		display: inline-block;
+		width: 0.85em;
+		height: 0.85em;
+		border: 2px solid currentColor;
+		border-right-color: transparent;
+		border-radius: 50%;
+		vertical-align: -0.1em;
+		animation: spin 0.7s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.spinner {
+			animation-duration: 2s;
+		}
+	}
 	.back {
 		font-size: 0.9em;
 	}

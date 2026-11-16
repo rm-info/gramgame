@@ -168,6 +168,25 @@ export interface QuestionStat {
 	total: number;
 }
 
+/** Mails « nouvelle évaluation » (élèves visés actuellement). */
+export interface MailSummary {
+	targets: number;
+	sent: number;
+	/** Échec à l'envoi (nouvel essai à minuit, sauf abandon). */
+	failed: number;
+	/** Envoi en cours. */
+	sending: number;
+	gave_up: number;
+	/** Envoi prévu à minuit ce jour-là (AAAA-MM-JJ), sinon null. */
+	scheduled_day: string | null;
+}
+
+/** Résultat de l'envoi immédiat à la publication (null si rien à faire ; failed = -1 : erreur). */
+export interface PublishMails {
+	sent: number;
+	failed: number;
+}
+
 export interface EvalResults {
 	evaluation: {
 		id: string;
@@ -187,6 +206,7 @@ export interface EvalResults {
 		correction_released: boolean;
 		correction_visible: boolean;
 		started: number;
+		mails: MailSummary;
 	};
 	students: ResultsStudent[];
 	stats: {
@@ -209,6 +229,7 @@ export const evalsApi = {
 	regenerate: (id: string, ex: string) => gramRequest<{ part: PartSummary }>('POST', `evals/${id}/parts/${ex}/regenerate`, {}),
 	removePart: (id: string, ex: string) => gramRequest<{ ok: boolean }>('DELETE', `evals/${id}/parts/${ex}`),
 	publish: (id: string, publish: boolean) => gramRequest<{ status: string }>('POST', `evals/${id}/publish`, { publish }),
+	sendMails: (id: string) => gramRequest<PublishMails>('POST', `evals/${id}/mails`, {}),
 	release: (id: string) => gramRequest<{ correction_released: boolean }>('POST', `evals/${id}/release`, {}),
 	paper: (id: string) => gramRequest<StudentView>('GET', `evals/${id}/paper`),
 	start: (id: string) => gramRequest<StudentView>('POST', `evals/${id}/start`, {}),
