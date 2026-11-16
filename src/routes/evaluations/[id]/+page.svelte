@@ -15,7 +15,8 @@
 		type CorrectionMode,
 		type EvalResults,
 		type CorrectedCopy,
-		type PartSummary
+		type PartSummary,
+		type PublishMails
 	} from '$lib/api/evals';
 
 	interface RuleOption {
@@ -235,11 +236,31 @@
 		run(
 			async () => {
 				if (on) await pb.collection('evaluations').update(id, settingsPayload());
-				await evalsApi.publish(id, on);
+				const r = await evalsApi.publish(id, on);
 				await reload();
+				if (on) msg = publishedMessage(r.mails);
 			},
-			on ? 'Publiée : les élèves la voient dans « Évaluations ».' : 'Repassée en préparation.'
+			on ? undefined : 'Repassée en préparation.'
 		);
+
+	/** Message après publication, avec le bilan des mails envoyés tout de suite. */
+	function publishedMessage(m: PublishMails | null): string {
+		let out = 'Publiée : les élèves la voient dans « Évaluations ».';
+		const day = data?.evaluation.mails.scheduled_day;
+		if (m && m.failed < 0) out += " Les mails n'ont pas pu partir : nouvel essai cette nuit à minuit.";
+		else {
+			if (m?.sent) out += ` Mail envoyé à ${plural(m.sent, 'élève')}.`;
+			if (m?.failed) out += ` ${plural(m.failed, 'mail')} non envoyé${m.failed > 1 ? 's' : ''} : nouvel essai cette nuit à minuit.`;
+			if (!m?.sent && !m?.failed && day) out += ` Les élèves seront prévenus par mail le ${fmtDay(day)}, à minuit.`;
+		}
+		return out;
+	}
+
+	const plural = (n: number, w: string) => `${n} ${w}${n > 1 ? 's' : ''}`;
+
+	/** '2026-11-20' → « vendredi 20 novembre ». */
+	const fmtDay = (day: string) =>
+		new Date(`${day}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
 	const release = () => {
 		if (!confirm('Donner la correction et la note à tous les élèves qui ont rendu leur copie ?')) return;
@@ -391,6 +412,17 @@
 						{ev.correction_visible
 							? 'Les élèves voient leur note et la correction.'
 							: `Les élèves verront leur note et la correction ${CORRECTION_LABELS[ev.correction_mode]}${ev.closes_at ? ` (${formatDateTime(ev.closes_at)})` : ''}.`}
+					</p>
+				{/if}
+
+				{#if ev.mails.scheduled_day}
+					<p class="muted small">📧 Les élèves seront prévenus par mail le {fmtDay(ev.mails.scheduled_day)}, à minuit.</p>
+				{:else if ev.mails.targets}
+					{@const retry = ev.mails.failed - ev.mails.gave_up}
+					<p class="muted small">
+						📧 Mail envoyé à {ev.mails.sent} élève{ev.mails.sent > 1 ? 's' : ''} sur {ev.mails.targets}{retry
+							? ` · ${retry} en attente (nouvel essai cette nuit à minuit)`
+							: ''}{ev.mails.gave_up ? ` · ${ev.mails.gave_up} non envoyé${ev.mails.gave_up > 1 ? 's' : ''} après 3 essais` : ''}.
 					</p>
 				{/if}
 
@@ -673,6 +705,12 @@
 					</label>
 				{/each}
 			</fieldset>
+			{#if !published}
+				<p class="muted small">
+					📧 À la publication, chaque élève reçoit un mail. Si l'évaluation ouvre un autre jour, le mail part ce
+					jour-là, à minuit.
+				</p>
+			{/if}
 			<div class="save-row">
 				<button type="button" disabled={busy || !editTitle.trim()} onclick={save}>Enregistrer</button>
 				{#if !published}

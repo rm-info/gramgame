@@ -822,7 +822,7 @@ onRecordCreateRequest((e) => {
 onRecordUpdateRequest((e) => {
 	const ev = require(`${__hooks}/lib/evals.js`);
 	const original = e.record.original();
-	for (const f of ['author', 'author_username', 'status', 'correction_released']) e.record.set(f, original.get(f));
+	for (const f of ['author', 'author_username', 'status', 'correction_released', 'mails']) e.record.set(f, original.get(f));
 	e.record.set('title', String(e.record.getString('title')).replace(/\s+/g, ' ').trim());
 
 	const before = ev.evalData(original);
@@ -1038,7 +1038,18 @@ routerAdd(
 			l.rec.set('status', 'draft');
 		}
 		e.app.save(l.rec);
-		return e.json(200, { status: l.rec.getString('status') });
+		// Sans date d'ouverture ou ouverture aujourd'hui : les élèves sont
+		// prévenus tout de suite ; sinon, à minuit le jour de l'ouverture.
+		let mails = null;
+		if (publish) {
+			try {
+				mails = require(`${__hooks}/lib/eval_mails.js`).sendEvalMails(e.app, l.ev.id, Date.now());
+			} catch (err) {
+				e.app.logger().error('Évaluation : envoi des mails échoué', 'evaluation', l.ev.id, 'error', String(err));
+				mails = { sent: 0, failed: -1 };
+			}
+		}
+		return e.json(200, { status: l.rec.getString('status'), mails });
 	},
 	$apis.requireAuth('users')
 );
@@ -1132,7 +1143,11 @@ routerAdd(
 				parts: ev.partSummaries(e.app, l.ev),
 				classes: classesOut,
 				correction_visible: ev.correctionVisible(l.ev, now),
-				started: subs.length
+				started: subs.length,
+				mails: (() => {
+					const em = require(`${__hooks}/lib/eval_mails.js`);
+					return em.mailSummary(l.ev, ev.targetIds(e.app, l.ev), em.jsonField(l.rec, 'mails'), now);
+				})()
 			}),
 			students,
 			stats: {
@@ -1310,6 +1325,18 @@ routerAdd(
 	},
 	$apis.requireAuth('users')
 );
+
+// Mails « nouvelle évaluation » : à minuit, heure de Paris, pour les évaluations
+// qui ouvrent ce jour-là (et rattrapage : échecs, nouveaux élèves visés).
+// Le cron de PocketBase est en UTC : on tourne chaque heure pile et on
+// n'agit qu'à 0 h à Paris (juste en heure d'été comme d'hiver).
+cronAdd('gram_eval_mails', '0 * * * *', () => {
+	const em = require(`${__hooks}/lib/eval_mails.js`);
+	const now = Date.now();
+	if (em.parisHour(now) !== 0) return;
+	const r = em.sendDueMails($app, now);
+	if (r.sent || r.failed) $app.logger().info('Évaluations : mails de minuit', 'evaluations', r.evaluations, 'sent', r.sent, 'failed', r.failed);
+});
 
 // Copies dont le temps est écoulé sans que l'élève les ait rendues.
 cronAdd('gram_eval_finalize', '*/5 * * * *', () => {
