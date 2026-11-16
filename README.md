@@ -185,7 +185,15 @@ Côté élève (« Évaluations », et un rappel sur l'accueil) : **une seule te
 
 Résultats pour l'auteur : copies rendues, moyenne, note /20 et points par partie pour chaque élève, copie corrigée détaillée, questions les plus ratées. « Refaire » efface la copie d'un élève pour qu'il recommence. Une fois qu'un élève a commencé, le sujet et le barème sont figés. On peut encore changer les dates, les élèves et le mode de correction. Les notes apparaissent aussi dans le suivi, à part de l'entraînement.
 
-Fichiers : `pb_migrations/1795300000_evaluations.js`, `pb_hooks/lib/evals.js` (sujet sans réponses, délais, notes), `lib/generation.js` et `lib/grading.js` (génération et correction partagées avec l'entraînement), `src/routes/evaluations/`.
+**Suivi de l'épreuve et V2 :**
+- **Durée** : temps entre « Commencer » et le rendu.
+- **Répondu** : part des questions auxquelles l'élève a répondu, juste ou faux. Pour la ponctuation, ce sont les endroits où un signe était attendu et où il en a mis un. Le chiffre est visible aussi pendant l'épreuve.
+- **Sorties** : nombre de fois où l'élève a quitté la page (autre onglet, autre application, écran verrouillé), avec le temps passé ailleurs. L'élève en est prévenu avant de commencer. Une autre fenêtre ouverte à côté n'est pas détectée.
+- **Ajuster la correction** (dans la copie) : l'auteur compte une réponse juste ou fausse à la main, ou revient à la correction automatique. La note est recalculée. Les phrases où l'IA a un doute (écriture libre) sont signalées. L'élève voit « réponse revue par… ». Dans le tableau, une `*` marque une note ajustée.
+- **Export CSV** : un fichier pour tableur, avec point-virgule et virgule décimale, qui s'ouvre directement dans Excel ou LibreOffice en français.
+- **Dupliquer** : même sujet (les exercices sont recopiés), même barème, mêmes réglages. La copie repart en préparation, sans élèves ni dates.
+
+Fichiers : `pb_migrations/1795300000_evaluations.js` et `1795500000_evaluations_v2.js`, `pb_hooks/lib/evals.js` (sujet sans réponses, délais, notes), `lib/generation.js` et `lib/grading.js` (génération et correction partagées avec l'entraînement), `src/routes/evaluations/`.
 
 ## Ajouter une règle de grammaire
 

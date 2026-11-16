@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { activeUsername } from '$lib/active-username.svelte';
+	import { pb } from '$lib/pb';
 	import ExercisePart from '$lib/components/ExercisePart.svelte';
 	import { evalsApi, formatDateTime, fmtNote, type StudentView } from '$lib/api/evals';
 
@@ -33,6 +34,45 @@
 			return;
 		}
 		load();
+	});
+
+	// Sorties de la page (autre onglet, autre appli, écran verrouillé) : signalées
+	// au serveur, l'auteur les voit. `keepalive` : la requête part même si l'onglet se ferme.
+	// Les signaux partent l'un après l'autre (« sorti » puis « revenu », jamais dans le désordre).
+	let queue: Promise<unknown> = Promise.resolve();
+	function beacon(path: string, body: unknown) {
+		const send = () =>
+			fetch(`/api/gram/evals/${id}/${path}`, {
+				method: 'POST',
+				keepalive: true,
+				headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+				body: JSON.stringify(body)
+			}).catch(() => {});
+		queue = queue.then(send, send);
+	}
+	let hiddenAt: number | null = null;
+	function onVisibility() {
+		if (!inProgress) return;
+		if (document.visibilityState === 'hidden') {
+			// On enregistre aussi les dernières réponses tout de suite.
+			const current = JSON.stringify(payload());
+			if (current !== lastSaved) {
+				if (saveTimer) clearTimeout(saveTimer);
+				beacon('save', { responses: JSON.parse(current) });
+				lastSaved = current;
+				saveState = 'saved';
+			}
+			hiddenAt = Date.now();
+			beacon('leave', { back: false });
+		} else if (hiddenAt !== null) {
+			beacon('leave', { back: true, away_ms: Date.now() - hiddenAt });
+			hiddenAt = null;
+		}
+	}
+	$effect(() => {
+		if (!inProgress) return;
+		document.addEventListener('visibilitychange', onVisibility);
+		return () => document.removeEventListener('visibilitychange', onVisibility);
 	});
 
 	onDestroy(() => {
@@ -206,6 +246,10 @@
 					{/if}
 					{#if e.closes_at}<li>À rendre avant le <strong>{formatDateTime(e.closes_at)}</strong>.</li>{/if}
 					<li>Pas d'indice ni de correction pendant l'évaluation.</li>
+					<li>
+						Reste sur cette page jusqu'à la fin : si tu la quittes (autre onglet, autre application, écran
+						verrouillé), {e.author_username} le verra.
+					</li>
 				</ul>
 				{#if view.state === 'open'}
 					<button type="button" disabled={busy} onclick={start}>{busy ? '…' : 'Commencer'}</button>
@@ -273,11 +317,17 @@
 					</ul>
 				</div>
 				{#each c.parts as p, i (p.exercise_id)}
+					{@const reviewed = (p.result?.per_blank ?? []).filter((b) => b.overridden).length}
 					<details class="card" open={i === 0}>
 						<summary>
 							<strong>Partie {i + 1} · {p.rule_name}</strong>
 							<span class="muted"> — {p.result?.score ?? 0}/{p.result?.score_total ?? 0} juste{(p.result?.score ?? 0) > 1 ? 's' : ''}</span>
 						</summary>
+						{#if reviewed}
+							<p class="muted small reviewed">
+								{reviewed === 1 ? 'Une réponse a été revue' : `${reviewed} réponses ont été revues`} par {e.author_username}.
+							</p>
+						{/if}
 						<div class="copy-body">
 							<ExercisePart
 								rule={p.rule}
@@ -398,6 +448,12 @@
 	}
 	.result p {
 		margin: 0;
+	}
+	.reviewed {
+		margin: var(--space-3) 0 0;
+	}
+	.small {
+		font-size: 0.88em;
 	}
 	.copy-body {
 		margin-top: var(--space-4);

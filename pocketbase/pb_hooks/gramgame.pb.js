@@ -1111,6 +1111,7 @@ routerAdd(
 				(classNames[sid] = classNames[sid] || []).push(rec.getString('name'));
 			}
 		}
+		const infos = ev.loadPartInfos(e.app, l.ev);
 		const ids = ev.targetIds(e.app, l.ev);
 		for (const sid of Object.keys(byStudent)) if (ids.indexOf(sid) < 0) ids.push(sid);
 		const users = ids.length ? e.app.findRecordsByIds('users', ids) : [];
@@ -1127,11 +1128,24 @@ routerAdd(
 				if (s) {
 					row.started_at = s.getString('started_at');
 					row.submitted_at = s.getString('submitted_at') || null;
+					// Durée (copie rendue) et réponses données, justes ou fausses.
+					row.duration_s = row.submitted_at ? ev.durationSeconds(row.started_at, row.submitted_at) : null;
+					const a = ev.answeredStats(infos, g.jsonField(s, 'responses') || {});
+					row.answered = a.answered;
+					row.answered_total = a.total;
+					row.answered_pct = a.pct;
+					row.leaves = s.getInt('leaves');
+					row.away_seconds = s.getInt('away_seconds');
+					row.away_now = !row.submitted_at && !!s.getString('left_at');
 					row.auto_submitted = s.getBool('auto_submitted');
 					if (row.submitted_at) {
 						row.note20 = s.getFloat('note20');
 						row.score_points = s.getFloat('score_points');
 						row.total_points = s.getFloat('total_points');
+						row.overrides = (g.jsonField(s, 'results') || []).reduce(
+							(n, r) => n + (r.per_blank || []).filter((b) => b.overridden).length,
+							0
+						);
 						row.parts = (g.jsonField(s, 'results') || []).map((r) => ({
 							exercise: r.exercise,
 							earned: r.earned,
@@ -1191,7 +1205,17 @@ routerAdd(
 		if (!sub.getString('submitted_at')) return e.json(400, { error: "L'élève n'a pas encore rendu sa copie." });
 		return e.json(
 			200,
-			Object.assign({ student_username: sub.getString('student_username'), title: l.ev.title }, ev.correctedCopy(e.app, l.ev, sub))
+			Object.assign(
+				{
+					id: sub.id,
+					student_username: sub.getString('student_username'),
+					title: l.ev.title,
+					started_at: sub.getString('started_at'),
+					leaves: sub.getInt('leaves'),
+					away_seconds: sub.getInt('away_seconds')
+				},
+				ev.correctedCopy(e.app, l.ev, sub)
+			)
 		);
 	},
 	$apis.requireAuth('users')
@@ -1249,7 +1273,9 @@ routerAdd(
 		const ev = require(`${__hooks}/lib/evals.js`);
 		const l = ev.loadForStudent(e.app, e.auth, e.request.pathValue('id'));
 		if (l.error) return e.json(l.status, { error: l.error });
-		return e.json(200, ev.studentView(e.app, l.ev, ev.findSubmission(e.app, l.ev.id, e.auth.id), Date.now()));
+		const sub = ev.findSubmission(e.app, l.ev.id, e.auth.id);
+		if (sub && !sub.getString('submitted_at')) ev.markBack(e.app, sub, Date.now());
+		return e.json(200, ev.studentView(e.app, l.ev, sub, Date.now()));
 	},
 	$apis.requireAuth('users')
 );
@@ -1347,6 +1373,103 @@ cronAdd('gram_eval_mails', '0 * * * *', () => {
 	const r = em.sendDueMails($app, now);
 	if (r.sent || r.failed) $app.logger().info('Évaluations : mails de minuit', 'evaluations', r.evaluations, 'sent', r.sent, 'failed', r.failed);
 });
+
+// Élève : il quitte la page (autre onglet, autre appli) ou y revient.
+// Visible par l'auteur dans les résultats ; l'élève en est prévenu avant de commencer.
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/leave',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForStudent(e.app, e.auth, e.request.pathValue('id'));
+		if (l.error) return e.json(l.status, { error: l.error });
+		const sub = ev.findSubmission(e.app, l.ev.id, e.auth.id);
+		if (!sub || sub.getString('submitted_at')) return e.json(200, { ok: false });
+		const now = Date.now();
+		const d = ev.deadlineOf(l.ev, ev.ms(sub.getString('started_at')));
+		if (d !== null && now > d) return e.json(200, { ok: false });
+		const body = g.readJsonBody(e) || {};
+		if (body.back === true) {
+			const away = Number(body.away_ms);
+			if (away >= 0 && away < 1e9) {
+				// Temps d'absence mesuré par le navigateur (plafonné à 6 h).
+				sub.set('away_seconds', sub.getInt('away_seconds') + Math.round(Math.min(away, 6 * 3600 * 1000) / 1000));
+				sub.set('left_at', '');
+				e.app.save(sub);
+			} else {
+				ev.markBack(e.app, sub, now);
+			}
+		} else {
+			sub.set('leaves', sub.getInt('leaves') + 1);
+			sub.set('left_at', new DateTime());
+			e.app.save(sub);
+		}
+		return e.json(200, { ok: true });
+	},
+	$apis.requireAuth('users')
+);
+
+// Auteur : compter juste / faux une question d'une copie (null = correction automatique).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/copies/{sub}/override',
+	(e) => {
+		const g = require(`${__hooks}/lib/gram.js`);
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		let sub;
+		try {
+			sub = e.app.findRecordById('eval_submissions', e.request.pathValue('sub'));
+		} catch (_) {
+			return e.json(404, { error: 'Copie introuvable.' });
+		}
+		if (sub.getString('evaluation') !== l.ev.id) return e.json(404, { error: 'Copie introuvable.' });
+		if (!sub.getString('submitted_at')) return e.json(400, { error: "L'élève n'a pas encore rendu sa copie." });
+		const body = g.readJsonBody(e) || {};
+		const ok = body.ok === true ? true : body.ok === false ? false : null;
+		const r = ev.applyOverride(g.jsonField(sub, 'results') || [], String(body.exercise || ''), Number(body.position), ok);
+		if (!r) return e.json(404, { error: 'Question introuvable.' });
+		sub.set('results', r.results);
+		sub.set('score_points', r.score_points);
+		sub.set('total_points', r.total_points);
+		sub.set('note20', r.note20);
+		e.app.save(sub);
+		return e.json(
+			200,
+			Object.assign(
+				{
+					id: sub.id,
+					student_username: sub.getString('student_username'),
+					title: l.ev.title,
+					started_at: sub.getString('started_at'),
+					leaves: sub.getInt('leaves'),
+					away_seconds: sub.getInt('away_seconds')
+				},
+				ev.correctedCopy(e.app, l.ev, sub)
+			)
+		);
+	},
+	$apis.requireAuth('users')
+);
+
+// Auteur : dupliquer (pour une autre classe, une autre année…).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/duplicate',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		if (e.app.countRecords('evaluations', $dbx.hashExp({ author: e.auth.id, status: 'draft' })) >= 30) {
+			return e.json(400, { error: "Tu as déjà 30 évaluations en préparation : supprimes-en avant d'en créer d'autres." });
+		}
+		const rec = ev.duplicate(e.app, e.auth, l.ev);
+		return e.json(200, { id: rec.id });
+	},
+	$apis.requireAuth('users')
+);
 
 // Copies dont le temps est écoulé sans que l'élève les ait rendues.
 cronAdd('gram_eval_finalize', '*/5 * * * *', () => {

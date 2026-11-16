@@ -16,8 +16,12 @@
 		type EvalResults,
 		type CorrectedCopy,
 		type PartSummary,
-		type PublishMails
+		type PublishMails,
+		type AuthorCopy,
+		type ResultsStudent,
+		fmtDuration
 	} from '$lib/api/evals';
+	import type { PerBlank } from '$lib/api/correct';
 
 	interface RuleOption {
 		id: string;
@@ -86,7 +90,8 @@
 
 	// Copie ouverte
 	let copyOf = $state<string | null>(null);
-	let copy = $state<(CorrectedCopy & { student_username: string }) | null>(null);
+	let copy = $state<AuthorCopy | null>(null);
+	let overriding = $state<string | null>(null);
 	let copyLoading = $state(false);
 
 	const ev = $derived(data?.evaluation ?? null);
@@ -367,6 +372,103 @@
 		copyLoading = false;
 	}
 
+	/** Compter juste / faux une question (null : revenir à la correction automatique). */
+	async function overrideQ(exercise: string, b: PerBlank, ok: boolean | null) {
+		if (!copy) return;
+		overriding = `${exercise}:${b.position}`;
+		error = null;
+		try {
+			copy = await evalsApi.override(id, copy.id, exercise, b.position, ok);
+			await reload();
+		} catch (e) {
+			error = errorMessage(e);
+		}
+		overriding = null;
+	}
+
+	/** Libellé d'une réponse dans la liste d'ajustement. */
+	function answerLabel(type: string, b: PerBlank): string {
+		const given = b.given === null || b.given === undefined || b.given === '' ? '(pas de réponse)' : b.given;
+		if (type === 'punctuation') {
+			if (b.extra) return `${b.context ?? ''} : « ${given} » en trop`;
+			return `${b.context ?? ''} : « ${given} », attendu « ${b.correct} »`;
+		}
+		const where = b.context ? `${b.context} — ` : `${type === 'qcm' || type === 'span' || type === 'transform' ? 'Question' : 'Trou'} ${b.position} : `;
+		return `${where}« ${given} »${b.correct ? `, attendu « ${b.correct} »` : ''}`;
+	}
+
+	async function duplicateEval() {
+		busy = true;
+		error = null;
+		try {
+			const r = await evalsApi.duplicate(id);
+			await goto(`${base}/evaluations/${r.id}`);
+			msg = 'Copie créée : choisis les élèves et les dates, puis publie-la.';
+		} catch (e) {
+			error = errorMessage(e);
+		}
+		busy = false;
+	}
+
+	/** « 16/11/2026 21:33 » : reconnu comme date par les tableurs français. */
+	function csvDate(iso: string | null | undefined): string {
+		if (!iso) return '';
+		const d = new Date(iso.replace(' ', 'T'));
+		if (isNaN(d.getTime())) return '';
+		return d
+			.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+			.replace(',', '');
+	}
+
+	/** Tableau des résultats en CSV (point-virgule, virgule décimale : s'ouvre tel quel dans un tableur français). */
+	function exportCsv() {
+		if (!data || !ev) return;
+		const num = (n: number | null | undefined) =>
+			n === null || n === undefined ? '' : String(Math.round(n * 100) / 100).replace('.', ',');
+		const cell = (v: string) => (/[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+		const head = [
+			'Élève',
+			'Classes',
+			'État',
+			'Commencée',
+			'Rendue',
+			'Durée (min)',
+			'Réponses données (%)',
+			'Sorties de la page',
+			'Temps hors de la page (min)',
+			'Note /20',
+			'Points',
+			'Sur',
+			...ev.parts.map((p, i) => `P${i + 1} ${p.rule_name} /${p.points}`),
+			'Corrections manuelles'
+		];
+		const rows = data.students.map((st: ResultsStudent) => [
+			st.username,
+			st.classes.join(', '),
+			STATUS_LABEL[st.status] + (st.auto_submitted ? ' (temps écoulé)' : ''),
+			csvDate(st.started_at),
+			csvDate(st.submitted_at),
+			st.duration_s === null || st.duration_s === undefined ? '' : num(st.duration_s / 60),
+			st.answered_pct === undefined ? '' : String(st.answered_pct),
+			st.leaves === undefined ? '' : String(st.leaves),
+			st.away_seconds === undefined ? '' : num(st.away_seconds / 60),
+			st.status === 'submitted' ? num(st.note20) : '',
+			st.status === 'submitted' ? num(st.score_points) : '',
+			st.status === 'submitted' ? num(st.total_points) : '',
+			...ev.parts.map((p) => num(st.parts?.find((x) => x.exercise === p.exercise_id)?.earned)),
+			st.overrides ? String(st.overrides) : ''
+		]);
+		const csv = '\ufeff' + [head, ...rows].map((r) => r.map((v) => cell(String(v))).join(';')).join('\r\n');
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+		const slug = ev.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+		a.download = `${slug || 'evaluation'}-resultats.csv`;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+	}
+
 	function allowRetake(subId: string, username: string) {
 		if (!confirm(`Effacer la copie de « ${username} » ? Il ou elle pourra refaire l'évaluation.`)) return;
 		run(async () => {
@@ -413,6 +515,9 @@
 				{:else if !started}
 					<button type="button" class="secondary" disabled={busy} onclick={() => publish(false)}>Repasser en préparation</button>
 				{/if}
+				<button type="button" class="link" disabled={busy || !ev.parts.length} onclick={duplicateEval} title="Même sujet et même barème, pour une autre classe"
+					>Dupliquer</button
+				>
 				<button type="button" class="link danger" disabled={busy} onclick={removeEval}>Supprimer</button>
 			</div>
 		</header>
@@ -462,7 +567,10 @@
 						<thead>
 							<tr>
 								<th>Élève</th>
-								<th>État</th>
+								<th class="hide-sm">État</th>
+								<th class="num" title="Temps mis pour rendre la copie">Durée</th>
+								<th class="num" title="Réponses données, justes ou fausses">Répondu</th>
+								<th class="num hide-sm" title="Nombre de fois où l'élève a quitté la page (autre onglet, autre appli)">Sorties</th>
 								<th class="num">Note</th>
 								{#each ev.parts as p, i (p.exercise_id)}
 									<th class="num part-col" title={p.rule_name}>P{i + 1}<span class="muted">/{p.points}</span></th>
@@ -474,13 +582,31 @@
 							{#each data.students as s (s.id)}
 								<tr class:open={copyOf === s.submission_id}>
 									<td>
-										<strong>{s.username}</strong>
-										{#if s.classes.length}<span class="muted small"> · {s.classes.join(', ')}</span>{/if}
+										<strong class="nowrap">{s.username}</strong>
+										{#if s.classes.length}<span class="muted small hide-sm"> · {s.classes.join(', ')}</span>{/if}
 									</td>
-									<td class="small">
+									<td class="small hide-sm">
 										{STATUS_LABEL[s.status]}{#if s.auto_submitted}<span class="muted" title="Rendue automatiquement à la fin du temps"> (temps écoulé)</span>{/if}
 									</td>
-									<td class="num"><strong>{s.status === 'submitted' ? fmtNote(s.note20) : '—'}</strong></td>
+									<td class="num small">{s.status === 'submitted' ? fmtDuration(s.duration_s) : '—'}</td>
+									<td class="num small" title={s.answered_total ? `${s.answered}/${s.answered_total} réponses` : ''}>
+										{s.answered_pct === undefined ? '—' : `${s.answered_pct} %`}
+									</td>
+									<td
+										class="num small hide-sm"
+										class:warn={(s.leaves ?? 0) > 0}
+										title={s.leaves ? `${fmtDuration(s.away_seconds ?? 0)} hors de la page` : ''}
+									>
+										{s.leaves === undefined ? '—' : s.leaves}{#if s.away_now}<span title="Hors de la page en ce moment"> ⏸</span>{/if}
+									</td>
+									<td class="num">
+										{#if s.status === 'submitted'}<strong>{fmtNote(s.note20)}</strong>{:else if s.status === 'in_progress'}<span
+												class="muted small">en cours</span
+											>{:else}<span class="muted" title="pas commencée">—</span>{/if}{#if s.overrides}<span
+												class="muted"
+												title={`${s.overrides} réponse(s) corrigée(s) à la main`}>*</span
+											>{/if}
+									</td>
 									{#each ev.parts as p (p.exercise_id)}
 										{@const r = s.parts?.find((x) => x.exercise === p.exercise_id)}
 										<td class="num part-col">{r ? fmtNote(r.earned) : '—'}</td>
@@ -508,7 +634,14 @@
 				</div>
 				<p class="muted small legend">
 					{#each ev.parts as p, i (p.exercise_id)}<span>P{i + 1} = {p.rule_name}</span>{/each}
+					<span>Répondu = réponses données, justes ou fausses</span>
+					<span>* = note ajustée à la main</span>
 				</p>
+				<div>
+					<button type="button" class="secondary csv" disabled={!data.students.length} onclick={exportCsv}
+						>Exporter en CSV (tableur)</button
+					>
+				</div>
 			</div>
 
 			{#if copyOf}
@@ -519,7 +652,11 @@
 						<h2>Copie de {copy.student_username} : {fmtNote(copy.note20)}/20</h2>
 						<p class="muted small">
 							Rendue {formatDateTime(copy.submitted_at)}{copy.auto_submitted ? ' (automatiquement, temps écoulé)' : ''}
+							en {fmtDuration(Math.round((Date.parse(copy.submitted_at.replace(' ', 'T')) - Date.parse(copy.started_at.replace(' ', 'T'))) / 1000))}
 							· {fmtNote(copy.score_points)}/{copy.total_points} points
+							· {copy.leaves
+								? `a quitté la page ${copy.leaves} fois (${fmtDuration(copy.away_seconds)} en tout)`
+								: "n'a pas quitté la page"}
 						</p>
 						{#each copy.parts as p, i (p.exercise_id)}
 							<div class="copy-part stack">
@@ -537,6 +674,42 @@
 									readonly
 									results={p.result?.per_blank ?? []}
 								/>
+								{#if p.result?.per_blank?.length}
+									{@const list = [...p.result.per_blank].sort((a, b) => a.position - b.position)}
+									{@const toCheck = list.filter((b) => b.uncertain && !b.overridden).length}
+									<details class="adjust" open={toCheck > 0}>
+										<summary>
+											Ajuster la correction{#if toCheck}<span class="to-check"> · {toCheck} à vérifier</span>{/if}
+										</summary>
+										<ul>
+											{#each list as b (b.position + (b.extra ? 'x' : ''))}
+												{@const key = `${p.exercise_id}:${b.position}`}
+												<li class:uncertain={b.uncertain && !b.overridden}>
+													<span class="mark" class:right={b.ok}>{b.ok ? '✓' : '✗'}</span>
+													<span class="what">
+														{answerLabel(p.rule_type, b)}
+														{#if b.overridden}<span class="tag">revu à la main</span>{:else if b.uncertain}<span class="tag warn"
+																>l'IA a un doute</span
+															>{/if}
+													</span>
+													<span class="adj-actions">
+														<button
+															type="button"
+															class="link"
+															disabled={overriding === key}
+															onclick={() => overrideQ(p.exercise_id, b, !b.ok)}>{b.ok ? 'Compter faux' : 'Compter juste'}</button
+														>
+														{#if b.overridden}
+															<button type="button" class="link" disabled={overriding === key} onclick={() => overrideQ(p.exercise_id, b, null)}
+																>Annuler</button
+															>
+														{/if}
+													</span>
+												</li>
+											{/each}
+										</ul>
+									</details>
+								{/if}
 							</div>
 						{/each}
 					{/if}
@@ -884,6 +1057,82 @@
 		.part-col {
 			display: none;
 		}
+	}
+	/* Nom d'élève jamais coupé (au tiret notamment) ; le tableau défile s'il le faut. */
+	.nowrap {
+		white-space: nowrap;
+	}
+	.warn {
+		color: var(--color-warning);
+		font-weight: 600;
+	}
+	@media (max-width: 640px) {
+		.hide-sm {
+			display: none;
+		}
+		.results th,
+		.results td {
+			padding: 6px 4px;
+		}
+		.row-actions {
+			display: flex;
+			flex-direction: column;
+			align-items: flex-end;
+		}
+	}
+	button.csv {
+		width: auto;
+	}
+	.adjust summary {
+		cursor: pointer;
+		font-weight: 600;
+		color: var(--color-primary);
+	}
+	.to-check {
+		color: var(--color-warning);
+	}
+	.adjust ul {
+		list-style: none;
+		margin: 8px 0 0;
+		padding: 0;
+	}
+	.adjust li {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		padding: 6px 0;
+		border-bottom: 1px solid var(--color-border);
+		flex-wrap: wrap;
+	}
+	.adjust li.uncertain {
+		background: rgba(201, 122, 29, 0.08);
+	}
+	.adjust .mark {
+		font-weight: 700;
+		color: var(--color-error);
+		width: 1em;
+	}
+	.adjust .mark.right {
+		color: var(--color-success);
+	}
+	.adjust .what {
+		flex: 1;
+		min-width: 12em;
+	}
+	.adj-actions {
+		white-space: nowrap;
+	}
+	.tag {
+		font-size: 0.8em;
+		padding: 0 6px;
+		margin-left: 4px;
+		border-radius: 999px;
+		border: 1px solid currentColor;
+		color: var(--color-primary);
+	}
+	.tag.warn {
+		color: var(--color-warning);
+		font-weight: 400;
 	}
 	.legend {
 		display: flex;
