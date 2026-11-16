@@ -1038,18 +1038,28 @@ routerAdd(
 			l.rec.set('status', 'draft');
 		}
 		e.app.save(l.rec);
-		// Sans date d'ouverture ou ouverture aujourd'hui : les élèves sont
-		// prévenus tout de suite ; sinon, à minuit le jour de l'ouverture.
-		let mails = null;
-		if (publish) {
-			try {
-				mails = require(`${__hooks}/lib/eval_mails.js`).sendEvalMails(e.app, l.ev.id, Date.now());
-			} catch (err) {
-				e.app.logger().error('Évaluation : envoi des mails échoué', 'evaluation', l.ev.id, 'error', String(err));
-				mails = { sent: 0, failed: -1 };
-			}
+		return e.json(200, { status: l.rec.getString('status') });
+	},
+	$apis.requireAuth('users')
+);
+
+// Mails « nouvelle évaluation » : appelé par la page juste après la
+// publication, pour que « Publier » réponde sans attendre le serveur de mail.
+// Sans date d'ouverture ou ouverture aujourd'hui : les élèves sont prévenus
+// tout de suite ; sinon, rien ici (tâche de minuit le jour de l'ouverture).
+routerAdd(
+	'POST',
+	'/api/gram/evals/{id}/mails',
+	(e) => {
+		const ev = require(`${__hooks}/lib/evals.js`);
+		const l = ev.loadForAuthor(e.app, e.auth, e.request.pathValue('id'), true);
+		if (l.error) return e.json(l.status, { error: l.error });
+		try {
+			return e.json(200, require(`${__hooks}/lib/eval_mails.js`).sendEvalMails(e.app, l.ev.id, Date.now()));
+		} catch (err) {
+			e.app.logger().error('Évaluation : envoi des mails échoué', 'evaluation', l.ev.id, 'error', String(err));
+			return e.json(200, { sent: 0, failed: -1 });
 		}
-		return e.json(200, { status: l.rec.getString('status'), mails });
 	},
 	$apis.requireAuth('users')
 );

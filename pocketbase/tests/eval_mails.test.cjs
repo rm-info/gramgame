@@ -35,7 +35,11 @@ const mails = { a: { sent_at: 'x' }, b: { fails: 1 }, c: { fails: em.MAX_FAILS }
 assert.deepStrictEqual(em.pendingStudents(['a', 'b', 'c', 'd'], mails), ['b', 'd'], 'déjà prévenu ou abandonné : non');
 assert.deepStrictEqual(em.pendingStudents(['a', 'b'], null), ['a', 'b']);
 const sum = em.mailSummary(ev({ opens_at: '2026-11-20 07:00:00.000Z' }), ['a', 'b', 'c', 'd'], mails, now);
-assert.deepStrictEqual(sum, { targets: 4, sent: 1, failed: 2, gave_up: 1, scheduled_day: '2026-11-20' });
+assert.deepStrictEqual(sum, { targets: 4, sent: 1, failed: 2, sending: 0, gave_up: 1, scheduled_day: '2026-11-20' });
+// Envoi en cours (réservé il y a 2 min) : pas repris ; réservé il y a 15 min : interrompu, repris.
+const busy = { a: { sending_at: '2026-11-16T08:58:00.000Z' }, b: { fails: 1, sending_at: '2026-11-16T08:45:00.000Z' } };
+assert.deepStrictEqual(em.pendingStudents(['a', 'b'], busy, now), ['b'], 'en cours : pas de doublon');
+assert.strictEqual(em.mailSummary(ev({}), ['a', 'b'], busy, now).sending, 1);
 assert.strictEqual(em.mailSummary(ev({}), [], {}, now).scheduled_day, null);
 
 // ── Contenu

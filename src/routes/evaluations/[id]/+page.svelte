@@ -68,6 +68,10 @@
 	let partEdits = $state<Record<string, { points: number; hard: boolean }>>({});
 
 	let busy = $state(false);
+	/** Publication en cours (spinner sur le bouton). */
+	let publishing = $state(false);
+	/** Mails en cours d'envoi, après la publication. */
+	let mailing = $state(false);
 	let msg = $state<string | null>(null);
 	let error = $state<string | null>(null);
 
@@ -232,16 +236,39 @@
 			await reload();
 		}, 'Enregistré.');
 
-	const publish = (on: boolean) =>
-		run(
+	const publish = (on: boolean) => {
+		publishing = on;
+		return run(
 			async () => {
-				if (on) await pb.collection('evaluations').update(id, settingsPayload());
-				const r = await evalsApi.publish(id, on);
+				try {
+					if (on) await pb.collection('evaluations').update(id, settingsPayload());
+					await evalsApi.publish(id, on);
+				} finally {
+					publishing = false;
+				}
 				await reload();
-				if (on) msg = publishedMessage(r.mails);
+				if (on) {
+					msg = publishedMessage(null);
+					void sendMails();
+				}
 			},
 			on ? undefined : 'Repassée en préparation.'
 		);
+	};
+
+	/** Envoi des mails après la publication, sans bloquer la page. */
+	async function sendMails() {
+		mailing = true;
+		let m: PublishMails;
+		try {
+			m = await evalsApi.sendMails(id);
+		} catch {
+			m = { sent: 0, failed: -1 };
+		}
+		mailing = false;
+		await reload();
+		if (msg?.startsWith('Publiée')) msg = publishedMessage(m);
+	}
 
 	/** Message après publication, avec le bilan des mails envoyés tout de suite. */
 	function publishedMessage(m: PublishMails | null): string {
@@ -380,7 +407,9 @@
 			</div>
 			<div class="head-actions">
 				{#if !published}
-					<button type="button" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>Publier</button>
+					<button type="button" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>
+						{#if publishing}<span class="spinner" aria-hidden="true"></span> Publication…{:else}Publier{/if}
+					</button>
 				{:else if !started}
 					<button type="button" class="secondary" disabled={busy} onclick={() => publish(false)}>Repasser en préparation</button>
 				{/if}
@@ -417,6 +446,8 @@
 
 				{#if ev.mails.scheduled_day}
 					<p class="muted small">📧 Les élèves seront prévenus par mail le {fmtDay(ev.mails.scheduled_day)}, à minuit.</p>
+				{:else if mailing || ev.mails.sending}
+					<p class="muted small" role="status"><span class="spinner" aria-hidden="true"></span> 📧 Envoi des mails en cours…</p>
 				{:else if ev.mails.targets}
 					{@const retry = ev.mails.failed - ev.mails.gave_up}
 					<p class="muted small">
@@ -714,7 +745,9 @@
 			<div class="save-row">
 				<button type="button" disabled={busy || !editTitle.trim()} onclick={save}>Enregistrer</button>
 				{#if !published}
-					<button type="button" class="secondary" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>Enregistrer et publier</button>
+					<button type="button" class="secondary" disabled={busy || !ev.parts.length} onclick={() => publish(true)}>
+						{#if publishing}<span class="spinner" aria-hidden="true"></span> Publication…{:else}Enregistrer et publier{/if}
+					</button>
 				{/if}
 			</div>
 		</div>
@@ -722,6 +755,26 @@
 </section>
 
 <style>
+	.spinner {
+		display: inline-block;
+		width: 0.85em;
+		height: 0.85em;
+		border: 2px solid currentColor;
+		border-right-color: transparent;
+		border-radius: 50%;
+		vertical-align: -0.1em;
+		animation: spin 0.7s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.spinner {
+			animation-duration: 2s;
+		}
+	}
 	.back {
 		font-size: 0.9em;
 	}

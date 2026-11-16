@@ -14,6 +14,9 @@
 /** Au-delà de ce nombre d'échecs pour un élève, on n'essaie plus. */
 const MAX_FAILS = 3;
 
+/** Un envoi « en cours » plus vieux que ça est considéré comme interrompu. */
+const SENDING_TTL_MS = 10 * 60000;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Heure de Paris, sans dépendre du fuseau de la machine
 // ────────────────────────────────────────────────────────────────────────────
@@ -73,12 +76,15 @@ function mailDue(ev, now) {
 	return opens === null || parisDay(opens) <= parisDay(now);
 }
 
-/** Élèves à prévenir : visés, pas encore prévenus, pas trop d'échecs. */
-function pendingStudents(targetIds, mails) {
+/** Envoi en cours pour cet élève (réservé par un autre envoi il y a peu) ? */
+const isSending = (m, now) => !!(m && !m.sent_at && m.sending_at && now - (ms(m.sending_at) || 0) < SENDING_TTL_MS);
+
+/** Élèves à prévenir : visés, pas encore prévenus, pas en cours d'envoi, pas trop d'échecs. */
+function pendingStudents(targetIds, mails, now = Date.now()) {
 	const log = mails && typeof mails === 'object' ? mails : {};
 	return targetIds.filter((id) => {
 		const m = log[id];
-		return !m || (!m.sent_at && (Number(m.fails) || 0) < MAX_FAILS);
+		return !m || (!m.sent_at && !isSending(m, now) && (Number(m.fails) || 0) < MAX_FAILS);
 	});
 }
 
@@ -87,9 +93,11 @@ function mailSummary(ev, targetIds, mails, now) {
 	const log = mails && typeof mails === 'object' ? mails : {};
 	let sent = 0;
 	let failed = 0;
+	let sending = 0;
 	for (const id of targetIds) {
 		const m = log[id];
 		if (m && m.sent_at) sent++;
+		else if (isSending(m, now)) sending++;
 		else if (m && m.fails) failed++;
 	}
 	const opens = ms(ev.opens_at);
@@ -97,6 +105,7 @@ function mailSummary(ev, targetIds, mails, now) {
 		targets: targetIds.length,
 		sent,
 		failed,
+		sending,
 		gave_up: targetIds.filter((id) => log[id] && !log[id].sent_at && (Number(log[id].fails) || 0) >= MAX_FAILS).length,
 		// Envoi prévu à minuit le jour de l'ouverture (null : déjà dû).
 		scheduled_day: ev.status === 'published' && opens !== null && parisDay(opens) > parisDay(now) ? parisDay(opens) : null
@@ -143,60 +152,78 @@ function jsonField(rec, name) {
 /**
  * Envoie les mails dus pour une évaluation. Renvoie { sent, failed }.
  * Ne fait rien si l'évaluation n'est pas (encore) concernée.
+ *
+ * Les élèves sont d'abord réservés (sending_at) dans une transaction : deux
+ * envois simultanés (double publication, tâche de minuit) ne prennent jamais
+ * le même élève, donc pas de doublon. Les mails partent hors transaction.
  */
 function sendEvalMails(app, evalId, now) {
 	const evs = require(`${__hooks}/lib/evals.js`);
-	let rec = app.findRecordById('evaluations', evalId);
-	const ev = evs.evalData(rec);
+	const iso = new Date(now).toISOString();
 	const out = { sent: 0, failed: 0 };
-	if (!mailDue(ev, now)) return out;
-
-	const todo = pendingStudents(evs.targetIds(app, ev), jsonField(rec, 'mails'));
-	if (!todo.length) return out;
+	const claimed = {};
+	let ev = null;
+	app.runInTransaction((tx) => {
+		const rec = tx.findRecordById('evaluations', evalId);
+		ev = evs.evalData(rec);
+		if (!mailDue(ev, now)) return;
+		const log = jsonField(rec, 'mails') || {};
+		for (const sid of pendingStudents(evs.targetIds(tx, ev), log, now)) {
+			let user;
+			try {
+				user = tx.findRecordById('users', sid);
+			} catch (_) {
+				continue;
+			}
+			const address = user.getString('real_email');
+			if (user.getString('role') !== 'eleve' || !address) continue;
+			claimed[sid] = { address, username: user.getString('username') };
+			log[sid] = Object.assign({}, log[sid], { sending_at: iso });
+		}
+		if (Object.keys(claimed).length) {
+			rec.set('mails', log);
+			tx.save(rec);
+		}
+	});
+	if (!Object.keys(claimed).length) return out;
 
 	const meta = app.settings().meta;
 	const results = {};
-	for (const sid of todo) {
-		let user;
-		try {
-			user = app.findRecordById('users', sid);
-		} catch (_) {
-			continue;
-		}
-		const address = user.getString('real_email');
-		if (user.getString('role') !== 'eleve' || !address) continue;
-		const mail = buildMail(ev, user.getString('username'), meta.appURL, now);
+	for (const sid of Object.keys(claimed)) {
+		const { address, username } = claimed[sid];
+		const mail = buildMail(ev, username, meta.appURL, now);
 		try {
 			app.newMailClient().send(
 				new MailerMessage({
 					from: { address: meta.senderAddress, name: meta.senderName },
-					to: [{ address, name: user.getString('username') }],
+					to: [{ address, name: username }],
 					subject: mail.subject,
 					html: mail.html,
 					text: mail.text
 				})
 			);
-			results[sid] = { sent_at: new Date(now).toISOString() };
+			results[sid] = true;
 			out.sent++;
 		} catch (err) {
-			results[sid] = { error: true };
+			results[sid] = false;
 			out.failed++;
 			app.logger().error('Évaluation : mail non envoyé', 'evaluation', evalId, 'student', sid, 'error', String(err));
 		}
 	}
 
-	// Relu juste avant d'écrire : l'envoi a pu prendre du temps.
-	rec = app.findRecordById('evaluations', evalId);
-	const mails = jsonField(rec, 'mails') || {};
-	for (const sid of Object.keys(results)) {
-		if (results[sid].sent_at) mails[sid] = { sent_at: results[sid].sent_at };
-		else {
-			const prev = mails[sid] && !mails[sid].sent_at ? Number(mails[sid].fails) || 0 : 0;
-			mails[sid] = { fails: prev + 1, last_error_at: new Date(now).toISOString() };
+	app.runInTransaction((tx) => {
+		const rec = tx.findRecordById('evaluations', evalId);
+		const log = jsonField(rec, 'mails') || {};
+		for (const sid of Object.keys(results)) {
+			if (results[sid]) log[sid] = { sent_at: iso };
+			else {
+				const prev = log[sid] && !log[sid].sent_at ? Number(log[sid].fails) || 0 : 0;
+				log[sid] = { fails: prev + 1, last_error_at: iso };
+			}
 		}
-	}
-	rec.set('mails', mails);
-	app.save(rec);
+		rec.set('mails', log);
+		tx.save(rec);
+	});
 	return out;
 }
 
