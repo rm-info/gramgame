@@ -211,7 +211,7 @@ Limites :
 - La livraison n'est pas garantie par Apple, Google ou Mozilla.
 - L'auteur peut couper les rappels d'une évaluation (Réglages → « Rappel quotidien par notification »).
 
-Mise en route : demander une clé d'application sur `https://push.lab.rm-info.fr/request-key`, avec l'origine exacte de l'app (par ex. `https://gramgame.lab.rm-info.fr`), puis mettre `PUSH_APP_KEY=app_…` dans `pocketbase/.env` et redémarrer. La clé est un identifiant public, pas un secret. **Garder le jeton de demande (`req_…`) hors du dépôt**. Sans clé, l'option n'apparaît pas.
+Mise en route : la clé de GramGame (valable pour l'origine `https://gramgame.lab.rm-info.fr`) est dans `pocketbase/.env.example`. Sur une installation existante, recopier la ligne `PUSH_APP_KEY=…` dans `pocketbase/.env` et redémarrer. Pour une autre origine (préproduction…), demander à l'opérateur d'ajouter l'origine à l'app `gramgame`, ou demander une autre clé sur `https://push.lab.rm-info.fr/request-key`. La clé est un identifiant public, pas un secret. **Garder le jeton de demande (`req_…`) hors du dépôt**. Sans clé, l'option n'apparaît pas.
 
 ## Ajouter une règle de grammaire
 
