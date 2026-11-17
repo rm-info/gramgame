@@ -324,6 +324,7 @@ function evalData(rec) {
 		time_limit_min: rec.getInt('time_limit_min'),
 		correction_mode: rec.getString('correction_mode'),
 		correction_released: rec.getBool('correction_released'),
+		no_reminders: rec.getBool('no_reminders'),
 		created: rec.getString('created')
 	};
 }
@@ -711,6 +712,7 @@ function duplicate(app, auth, ev) {
 	rec.set('time_limit_min', ev.time_limit_min);
 	rec.set('correction_mode', ev.correction_mode === 'after_close' ? 'manual' : ev.correction_mode);
 	rec.set('correction_released', false);
+	rec.set('no_reminders', !!ev.no_reminders);
 	app.save(rec);
 	const parts = [];
 	for (const p of ev.parts) {

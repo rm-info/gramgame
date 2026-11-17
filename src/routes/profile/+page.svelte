@@ -5,6 +5,8 @@
 	import { pb, errorMessage, ROLE_LABELS } from '$lib/pb';
 	import LinksManager from '$lib/components/LinksManager.svelte';
 	import JoinClass from '$lib/components/JoinClass.svelte';
+	import PushOptIn from '$lib/components/PushOptIn.svelte';
+	import { pushReminders } from '$lib/push/reminders.svelte';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { GRADE_LEVELS, profileState } from '$lib/profile.svelte';
 
@@ -117,6 +119,13 @@
 			{/if}
 		</form>
 	</div>
+
+	{#if activeUsername.isStudent && pushReminders.status !== 'unavailable' && pushReminders.status !== 'unsupported' && pushReminders.status !== 'loading'}
+		<div class="card stack">
+			<h2>Rappels</h2>
+			<PushOptIn />
+		</div>
+	{/if}
 
 	{#if activeUsername.isStudent}
 		<div class="card stack">

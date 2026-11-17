@@ -5,6 +5,7 @@
 	import { base } from '$app/paths';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { pb } from '$lib/pb';
+	import { pushReminders } from '$lib/push/reminders.svelte';
 	import ExercisePart from '$lib/components/ExercisePart.svelte';
 	import { evalsApi, formatDateTime, fmtNote, type StudentView } from '$lib/api/evals';
 
@@ -180,6 +181,7 @@
 		error = null;
 		try {
 			setView(await evalsApi.start(id));
+			void pushReminders.refresh();
 			window.scrollTo({ top: 0 });
 		} catch (e) {
 			error = (e as Error).message;
@@ -199,6 +201,7 @@
 		if (saveTimer) clearTimeout(saveTimer);
 		try {
 			setView(await evalsApi.submit(id, payload()));
+			void pushReminders.refresh();
 			window.scrollTo({ top: 0 });
 		} catch (e) {
 			error = (e as Error).message;

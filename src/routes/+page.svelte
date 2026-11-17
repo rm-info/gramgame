@@ -5,6 +5,7 @@
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { mapAttempt, type AttemptRow } from '$lib/data';
 	import { evalsApi, formatDateTime, type MyEval } from '$lib/api/evals';
+	import { pushReminders } from '$lib/push/reminders.svelte';
 
 	let attempts = $state<AttemptRow[]>([]);
 	let loadingAttempts = $state(true);
@@ -42,6 +43,7 @@
 		evalsApi
 			.mine()
 			.then((r) => {
+				void pushReminders.syncEvals(r.evaluations);
 				evalsTodo = r.evaluations.filter(
 					(m) => m.state === 'open' && (m.status === 'todo' || m.status === 'in_progress')
 				);

@@ -67,6 +67,7 @@
 	let editCloses = $state('');
 	let editLimit = $state(0);
 	let editMode = $state<CorrectionMode>('manual');
+	let editReminders = $state(true);
 	let selClasses = $state<string[]>([]);
 	let selStudents = $state<string[]>([]);
 	let partEdits = $state<Record<string, { points: number; hard: boolean }>>({});
@@ -149,6 +150,7 @@
 		editCloses = toLocalInput(e.closes_at);
 		editLimit = e.time_limit_min || 0;
 		editMode = e.correction_mode;
+		editReminders = !e.no_reminders;
 		selClasses = e.classes.map((c) => c.id);
 		selStudents = [...(e.students ?? [])];
 		partEdits = Object.fromEntries(e.parts.map((p) => [p.exercise_id, { points: p.points, hard: p.hard_mode }]));
@@ -218,6 +220,7 @@
 			closes_at: fromLocalInput(editCloses),
 			time_limit_min: Math.max(0, Math.round(Number(editLimit) || 0)),
 			correction_mode: editMode,
+			no_reminders: !editReminders,
 			classes: selClasses,
 			// Les élèves déjà couverts par une classe choisie n'ont pas besoin d'être listés.
 			students: selStudents.filter((sid) => {
@@ -909,6 +912,13 @@
 					</label>
 				{/each}
 			</fieldset>
+			<label class="check">
+				<input type="checkbox" bind:checked={editReminders} />
+				<span>
+					Rappel quotidien par notification (17 h 30) aux élèves qui ne l'ont pas encore faite
+					<span class="muted small">— pour ceux qui ont activé les rappels dans l'app</span>
+				</span>
+			</label>
 			{#if !published}
 				<p class="muted small">
 					📧 À la publication, chaque élève reçoit un mail. Si l'évaluation ouvre un autre jour, le mail part ce

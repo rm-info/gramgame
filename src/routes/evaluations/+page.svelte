@@ -4,6 +4,8 @@
 	import { pb, errorMessage } from '$lib/pb';
 	import { activeUsername } from '$lib/active-username.svelte';
 	import { GRADE_LEVELS } from '$lib/profile.svelte';
+	import { pushReminders } from '$lib/push/reminders.svelte';
+	import PushOptIn from '$lib/components/PushOptIn.svelte';
 	import {
 		evalsApi,
 		formatDateTime,
@@ -31,7 +33,10 @@
 		loading = true;
 		loadError = null;
 		try {
-			if (activeUsername.isStudent) mine = (await evalsApi.mine()).evaluations;
+			if (activeUsername.isStudent) {
+				mine = (await evalsApi.mine()).evaluations;
+				void pushReminders.syncEvals(mine);
+			}
 			else if (activeUsername.isSupervisor) authorRows = (await evalsApi.authorList()).evaluations;
 		} catch (e) {
 			loadError = errorMessage(e);
@@ -78,6 +83,7 @@
 		<p class="error">{loadError}</p>
 	{:else if activeUsername.isStudent}
 		<p class="muted">Les évaluations que tes professeurs ou tes parents t'ont données. Une seule tentative chacune.</p>
+		<PushOptIn compact />
 
 		<div class="card stack">
 			<h2>À faire</h2>
