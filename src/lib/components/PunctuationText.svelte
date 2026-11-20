@@ -86,11 +86,21 @@
 		>{#if readonly && r}{#if r.extra}<span class="mark wrong" title="Pas de ponctuation ici">{r.given}</span
 				>{:else if r.ok}<span class="mark right">{r.given}</span>{:else}{#if r.given}<span
 						class="mark wrong">{r.given}</span
-					>{/if}<span class="mark missed" title="Il manquait : {LABELS[r.correct]}">{r.correct}</span
+					>{:else}<span class="mark blank" title="Pas de réponse" aria-label="pas de réponse"></span
+					>{/if}<span class="mark missed" title="{r.given ? 'Il fallait' : 'Pas de réponse, il fallait'} : {LABELS[r.correct]}"
+					>{r.correct}</span
 				>{/if}{:else if given}<span class="mark" class:pending={!readonly}>{given}</span>{/if}</span
 		>{' '}
 	{/each}
 </p>
+
+{#if readonly && results}
+	<p class="punct-legend">
+		<span class="mark right">.</span> juste ·
+		<span class="mark wrong">,</span><span class="mark missed">.</span> faux (ou en trop), puis le signe attendu ·
+		<span class="mark blank"></span><span class="mark missed">,</span> oublié, puis le signe attendu
+	</p>
+{/if}
 
 {#if !readonly}
 	<div class="toolbar" class:hidden={selected === null} aria-live="polite">
@@ -162,6 +172,22 @@
 	.mark.wrong {
 		color: var(--color-error);
 		text-decoration: line-through;
+	}
+	/* Oubli : case vide rouge, suivie du signe attendu. */
+	.mark.blank {
+		display: inline-block;
+		width: 0.7em;
+		height: 1em;
+		margin: 0 1px;
+		padding: 0;
+		vertical-align: -0.15em;
+		border: 2px dashed var(--color-error);
+		border-radius: 3px;
+	}
+	.punct-legend {
+		margin-top: var(--space-3, 12px);
+		font-size: 0.85em;
+		color: var(--color-text-muted, #666);
 	}
 	.mark.missed {
 		color: var(--color-success);

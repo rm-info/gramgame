@@ -99,7 +99,10 @@ assert.deepStrictEqual(qs.map((q) => [q.exercise, q.position, q.ok, q.total]), [
 
 // ── V2 : réponses données, durée, correction manuelle
 assert.deepStrictEqual(ev.answeredCount('qcm', [{ position: 1 }, { position: 2 }, { position: 3 }], { 1: 'il', 2: ' ', 3: '' }), { answered: 1, total: 3 });
-assert.deepStrictEqual(ev.answeredCount('punctuation', [{ position: 3 }, { position: 7 }], { 3: ',', 5: '.', 7: '' }), { answered: 1, total: 2 }, 'ponctuation : signe mis là où un signe était attendu');
+// Ponctuation : l'élève ne sait pas combien de signes sont attendus ; dès un signe posé, la partie compte comme traitée.
+assert.deepStrictEqual(ev.answeredCount('punctuation', [{ position: 3 }, { position: 7 }], { 3: ',', 5: '.', 7: '' }), { answered: 2, total: 2 }, 'ponctuation : au moins un signe = partie traitée');
+assert.deepStrictEqual(ev.answeredCount('punctuation', [{ position: 3 }, { position: 7 }], { 5: '.' }), { answered: 2, total: 2 }, 'ponctuation : même un signe mal placé');
+assert.deepStrictEqual(ev.answeredCount('punctuation', [{ position: 3 }, { position: 7 }], { 3: '', 7: ' ' }), { answered: 0, total: 2 }, 'ponctuation : aucun signe = rien de fait');
 assert.deepStrictEqual(ev.answeredCount('span', [{ position: 1 }], undefined), { answered: 0, total: 1 });
 assert.strictEqual(ev.durationSeconds('2026-11-15 10:00:00.000Z', '2026-11-15 10:12:30.000Z'), 750);
 assert.strictEqual(ev.durationSeconds('2026-11-15 10:00:00.000Z', ''), null);

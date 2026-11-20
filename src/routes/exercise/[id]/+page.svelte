@@ -314,10 +314,6 @@
 						<SpanSelectList items={view.blanks} bind:responses readonly results={result.per_blank} />
 					{:else if ruleType === 'punctuation'}
 						<PunctuationText {words} bind:responses readonly results={result.per_blank} />
-						<p class="muted small legend">
-							<span class="lg-right">.</span> juste · <span class="lg-wrong">.</span> en trop ou faux ·
-							<span class="lg-missed">.</span> manquant
-						</p>
 					{:else if ruleType === 'qcm'}
 						<QcmList
 							items={view.blanks}
@@ -503,27 +499,6 @@
 </section>
 
 <style>
-	.legend {
-		margin-top: var(--space-3, 12px);
-	}
-	.lg-right,
-	.lg-wrong,
-	.lg-missed {
-		font-weight: 700;
-		padding: 0 3px;
-	}
-	.lg-right {
-		color: var(--color-success);
-	}
-	.lg-wrong {
-		color: var(--color-error);
-		text-decoration: line-through;
-	}
-	.lg-missed {
-		color: var(--color-success);
-		background: rgba(46, 139, 87, 0.15);
-		border-radius: 3px;
-	}
 	.explanations {
 		list-style: none;
 		margin: 0;

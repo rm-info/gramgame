@@ -222,16 +222,19 @@ const PUNCT_MARKS = ['.', ',', '?', '!'];
 
 /**
  * Réponses données (justes ou fausses) sur une partie.
- * Ponctuation : signes attendus à un endroit où l'élève a mis un signe.
+ * Ponctuation : l'élève ne sait pas combien de signes sont attendus, donc un
+ * signe oublié est une erreur, pas une absence de réponse. Dès qu'il a posé au
+ * moins un signe (n'importe où), toute la partie compte comme traitée.
  */
 function answeredCount(ruleType, blanks, resp) {
 	const list = Array.isArray(blanks) ? blanks : [];
 	const r = resp && typeof resp === 'object' ? resp : {};
-	let answered = 0;
-	for (const b of list) {
-		const v = String(r[String(b.position)] ?? '').trim();
-		if (ruleType === 'punctuation' ? PUNCT_MARKS.indexOf(v) >= 0 : v !== '') answered++;
+	if (ruleType === 'punctuation') {
+		const any = Object.keys(r).some((k) => PUNCT_MARKS.indexOf(String(r[k] ?? '').trim()) >= 0);
+		return { answered: any ? list.length : 0, total: list.length };
 	}
+	let answered = 0;
+	for (const b of list) if (String(r[String(b.position)] ?? '').trim() !== '') answered++;
 	return { answered, total: list.length };
 }
 
